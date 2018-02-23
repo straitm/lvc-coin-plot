@@ -165,10 +165,10 @@ int ligopass2(const char * const infilename, const char * outbase_,
     exit(1);
   }
 
-  TDirectory * ligodir = dynamic_cast<TDirectory*>(ligofile->Get("ligo"));
+  TDirectory * ligodir = dynamic_cast<TDirectory*>(ligofile->Get("ligoanalysis"));
 
   if(!ligodir){
-    fprintf(stderr, "No \"ligo\" directory in this file\n");
+    fprintf(stderr, "No \"ligoanalysis\" directory in this file\n");
     exit(1);
   }
 
