@@ -7,19 +7,19 @@
 #include "TAxis.h"
 #include "TStyle.h"
 
-const double textsize = 0.05;
+const double textsize = 0.06;
 
 bool dividebylivetime = false;
 const char * outbase = NULL;
 
 TCanvas USN;
 
-TH1D * getordie(const char * const histname, TDirectory * const ligofile)
+TH1D * getordont(const char * const histname, TDirectory * const ligofile)
 {
   TH1D * h = dynamic_cast<TH1D *>(ligofile->Get(histname));
-  if(!h){
+  if(h == NULL){
     fprintf(stderr, "No histogram \"%s\" in your file\n", histname);
-    exit(1);
+    return NULL;
   }
   return h;
 }
@@ -54,6 +54,7 @@ void stylehist(TH1D * h)
   y->SetTitleSize(textsize);
 
   x->SetTitle("Time since GW event (s)");
+  x->SetNdivisions(508);
 
   if(effectivecount(h) < h->GetNbinsX()){
     h->SetMarkerStyle(kOpenCircle);
@@ -68,10 +69,10 @@ void stylecanvas(TCanvas * c)
   const double scale = 5.0;
   c->SetCanvasSize(128*scale, 96*scale);
 
-  c->  SetLeftMargin(0.14);
-  c-> SetRightMargin(0.03);
+  c->  SetLeftMargin(0.20);
+  c-> SetRightMargin(0.01);
   c->   SetTopMargin(0.06);
-  c->SetBottomMargin(0.11);
+  c->SetBottomMargin(0.13);
 }
 
 void divide_livetime(TH1D * d, TH1D * live)
@@ -95,62 +96,24 @@ void divide_livetime(TH1D * d, TH1D * live)
 void print2(const char * const name)
 {
   USN.Print(Form("%s-%s.pdf", outbase, name));
-  USN.Print(Form("%s.pdf", outbase));
 }
 
-void process_fullytracks(TH1D * tracks, TH1D * trackslive)
+void process(TH1D * tracks, TH1D * trackslive, const char * const title)
 {
-  divide_livetime(tracks, trackslive);
+  const int rebin = 10;
+  
+  tracks->Rebin(rebin);
+
+  if(trackslive != NULL){
+    trackslive->Rebin(rebin);
+    divide_livetime(tracks, trackslive);
+  }
 
   stylehist(tracks);
-  tracks->GetYaxis()->SetTitle("Number of slices with contained tracks/s");
+  tracks->GetYaxis()->SetTitle(Form("%s/%ds", title, rebin));
 
   tracks->Draw("e");
-  print2("containedtracks");
-}
-
-void process_halftracks(TH1D * tracks, TH1D * trackslive)
-{
-  divide_livetime(tracks, trackslive);
-
-  stylehist(tracks);
-  tracks->GetYaxis()->SetTitle("Number of slices with stopping tracks/s");
-
-  tracks->Draw("e");
-  print2("stoppingtracks");
-}
-
-void process_tracks(TH1D * tracks, TH1D * trackslive)
-{
-  divide_livetime(tracks, trackslive);
-
-  stylehist(tracks);
-  tracks->GetYaxis()->SetTitle("Number of tracks/s");
-
-  tracks->Draw("e");
-  print2("tracks");
-}
-
-void process_unslicedhits(TH1D * unsliced, TH1D * unslicedlive)
-{
-  divide_livetime(unsliced, unslicedlive);
-
-  stylehist(unsliced);
-  unsliced->GetYaxis()->SetTitle("Number of unsliced hits/s");
-
-  unsliced->Draw("e");
-  print2("unslicedhits");
-}
-
-void process_rawhits(TH1D * rawhits, TH1D * rawhitslive)
-{
-  divide_livetime(rawhits, rawhitslive);
-
-  stylehist(rawhits);
-  rawhits->GetYaxis()->SetTitle("Number of raw hits/s");
-
-  rawhits->Draw("e");
-  print2("rawhits");
+  print2(tracks->GetName());
 }
 
 int ligopass2(const char * const infilename, const char * outbase_,
@@ -166,27 +129,31 @@ int ligopass2(const char * const infilename, const char * outbase_,
   }
 
   TDirectory * ligodir = dynamic_cast<TDirectory*>(ligofile->Get("ligoanalysis"));
+  if(ligodir == NULL) ligodir = dynamic_cast<TDirectory*>(ligofile->Get("ligo"));
 
-  if(!ligodir){
+  if(ligodir == NULL){
     fprintf(stderr, "No \"ligoanalysis\" directory in this file\n");
     exit(1);
   }
 
-  #define GETORDIE(x) TH1D * x = getordie(#x, ligodir); \
-                      TH1D * x##live = getordie(#x"live", ligodir)
-
-  GETORDIE(rawhits);
-  GETORDIE(unslice4ddhits);
-  GETORDIE(tracks);
-  GETORDIE(halfcontained_tracks);
-  GETORDIE(fullycontained_tracks);
-
   stylecanvas(&USN);
-  USN.Print(Form("%s.pdf[", outbase));
-  process_rawhits(rawhits, rawhitslive);
-  process_unslicedhits(unslice4ddhits, unslice4ddhitslive);
-  process_tracks(tracks, trackslive);
-  process_halftracks(halfcontained_tracks, halfcontained_trackslive);
-  process_fullytracks(fullycontained_tracks, fullycontained_trackslive);
-  USN.Print(Form("%s.pdf]", outbase));
+
+  #define GETORDONT(x, y) TH1D * x = getordont(#x, ligodir); \
+                          TH1D * x##live = getordont(#x"live", ligodir); \
+                          if(x != NULL) process(x, x##live, y)
+
+  GETORDONT(rawtrigger,            "Raw triggers");
+  GETORDONT(rawhits,               "Raw hits");
+  GETORDONT(unslice4ddhits,        "Hits in the noise slice");
+  GETORDONT(tracks,                "Slices with tracks");
+  GETORDONT(halfcontained_tracks,  "Slices with stopping tracks");
+  GETORDONT(fullycontained_tracks, "Slices with contained tracks");
+  GETORDONT(contained_slices,      "Contained slices");
+  GETORDONT(unslicedbighits,       "Unsliced big hits");
+  GETORDONT(unslicedhitpairs,      "Supernova-like events");
+  GETORDONT(upmu_tracks,           "Upward going muons");
+  GETORDONT(energy_low_cut,        "Very high energy triggers");
+  GETORDONT(energy_high_cut,       "Very very high energy triggers");
+  GETORDONT(energy_low_cut_pertime,"Very high power events");
+  GETORDONT(energy_high_cut_pertime,"Very very high power events");
 }
