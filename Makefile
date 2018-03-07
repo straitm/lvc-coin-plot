@@ -10,3 +10,6 @@ ligopass2-neardet-bnb.pdf: ligopass2.C ligopass2.sh
 
 ligopass2-neardet-ddactivity1.pdf: ligopass2.C ligopass2.sh
 	./ligopass2.sh ../ligotest/neardet_ddactivity1.hists.root ligopass2-neardet-ddactivity1 0
+
+ndmev-unslicedbighits-10s.pdf: ligopass2.C ligopass2.sh
+	./ligopass2.sh ../ligotest/1516535068/ndmev.ligohists.root ndmev 1

@@ -1,4 +1,8 @@
+#include "TMinuit.h"
+#include "Math/Math.h"
+#include "Math/ProbFuncMathCore.h"
 #include "TH1.h"
+#include "TF1.h"
 #include "TGraph.h"
 #include "TLegend.h"
 #include "TCanvas.h"
@@ -13,6 +17,11 @@ bool dividebylivetime = false;
 const char * outbase = NULL;
 
 TCanvas USN;
+TPad * botpad, * midpad, * toppad;
+const double divheight1 = 0.29, divheight2 = 0.50;
+// Thanks ROOT for making this hard
+const double textratiomid = (1-divheight2)/(divheight2 - divheight1);
+const double textratiobot = (1-divheight2)/divheight1;
 
 TH1D * getordont(const char * const histname, TDirectory * const ligofile)
 {
@@ -35,7 +44,7 @@ double effectivecount(TH1D * h)
   return c;
 }
 
-void stylehist(TH1D * h)
+void stylehist(TH1D * h, const int can /* 0: full, 1: top, 2: mid, 3: bot */)
 {
   TAxis* y = h->GetYaxis();
   TAxis* x = h->GetXaxis();
@@ -48,17 +57,40 @@ void stylehist(TH1D * h)
   y->CenterTitle();
   x->CenterTitle();
 
-  x->SetLabelSize(textsize);
-  y->SetLabelSize(textsize);
-  x->SetTitleSize(textsize);
-  y->SetTitleSize(textsize);
+  const double siz = can == 0? textsize:
+    can == 1? textsize*1.333:
+    can == 2? textsize*1.333*textratiomid:
+              textsize*1.333*textratiobot;
+
+  x->SetLabelSize(siz);
+  y->SetLabelSize(siz);
+  x->SetTitleSize(siz);
+  y->SetTitleSize(siz);
+
+  x->SetTickSize(0.03);
+  y->SetTickSize(0.015);
 
   x->SetTitle("Time since GW event (s)");
   x->SetNdivisions(508);
+  y->SetNdivisions(can == 0?510: can == 1? 508: 504);
 
   if(effectivecount(h) < h->GetNbinsX()){
     h->SetMarkerStyle(kOpenCircle);
   }
+}
+
+void stylepad(TPad * pad)
+{
+  const float leftmargin = 0.2;
+
+  pad->SetBorderMode(0);
+  pad->SetBorderSize(2);
+  pad->SetTickx(1);
+  pad->SetTicky(1);
+  pad->SetFrameLineWidth(2);
+  pad->SetFrameBorderMode(0);
+  pad->SetLeftMargin(leftmargin);
+  pad->SetRightMargin(0.03);
 }
 
 void stylecanvas(TCanvas * c)
@@ -67,30 +99,60 @@ void stylecanvas(TCanvas * c)
   gStyle->SetOptStat(0);
 
   const double scale = 5.0;
-  c->SetCanvasSize(128*scale, 96*scale);
+  c->SetCanvasSize(100*scale, 100*scale);
 
   c->  SetLeftMargin(0.20);
   c-> SetRightMargin(0.01);
   c->   SetTopMargin(0.06);
   c->SetBottomMargin(0.13);
+
+  if(dividebylivetime){
+    toppad = new TPad("div", "div", 0, divheight2, 1,          1);
+    midpad = new TPad("raw", "raw", 0, divheight1, 1, divheight2);
+    botpad = new TPad("liv", "liv", 0,          0, 1, divheight1);
+    stylepad(toppad);
+    stylepad(midpad);
+    stylepad(botpad);
+
+    const double topmargin = 0.09;
+
+    toppad->SetTopMargin(topmargin);
+    toppad->SetBottomMargin(0);
+
+    midpad->SetBottomMargin(0);
+    midpad->SetTopMargin(0);
+
+    botpad->SetTopMargin(0);
+    botpad->SetBottomMargin(0.28);
+
+    const double pleftmargin = 0.19;
+    toppad->SetLeftMargin(pleftmargin);
+    botpad->SetLeftMargin(pleftmargin);
+    midpad->SetLeftMargin(pleftmargin);
+
+    toppad->Draw();
+    botpad->Draw();
+    midpad->Draw();
+  }
 }
 
-void divide_livetime(TH1D * d, TH1D * live)
+TH1D * divide_livetime(TH1D * d, TH1D * live)
 {
-  if(!dividebylivetime) return;
+  TH1D * answer = (TH1D*)d->Clone(Form("%sdiv", d->GetName()));
 
   for(int i = 1; i <= live->GetNbinsX(); i++){
     const double bc = d->GetBinContent(i);
     const double be = d->GetBinError(i);
     if(live->GetBinContent(i) == 0){
-      d->SetBinContent(i, 0);
-      d->SetBinError  (i, 0);
+      answer->SetBinContent(i, 0);
+      answer->SetBinError  (i, 0);
     }
     else{
-      d->SetBinContent(i, bc/live->GetBinContent(i));
-      d->SetBinError  (i, be/live->GetBinContent(i));
+      answer->SetBinContent(i, bc/live->GetBinContent(i));
+      answer->SetBinError  (i, be/live->GetBinContent(i));
     }
   }
+  return answer;
 }
 
 void print2(const char * const name)
@@ -98,26 +160,132 @@ void print2(const char * const name)
   USN.Print(Form("%s-%s.pdf", outbase, name));
 }
 
-void process(TH1D * tracks, TH1D * trackslive, const char * const title)
-{
-  const int rebin = 10;
-  
-  tracks->Rebin(rebin);
 
-  if(trackslive != NULL){
-    trackslive->Rebin(rebin);
-    divide_livetime(tracks, trackslive);
+TH1D * fithist = NULL, * fithistlive = NULL;
+static void fcn(__attribute__((unused)) int & np,
+  __attribute__((unused)) double * gin, double & like, double *par,
+  __attribute__((unused)) int flag)
+{
+  like = 0;
+
+  const double flat = par[0];
+
+  for(int i = 1; i <= fithist->GetNbinsX(); i++){
+
+    const double model = flat * fithistlive->GetBinContent(i);
+    const double data = fithist->GetBinContent(i);
+
+    if(model > 0){
+      like += model - data;
+      if(data > 0) like += data * log(data/model);
+    }
   }
 
-  stylehist(tracks);
-  tracks->GetYaxis()->SetTitle(Form("%s/%ds", title, rebin));
-
-  tracks->Draw("e");
-  print2(tracks->GetName());
+  like *= 2;
 }
 
-int ligopass2(const char * const infilename, const char * outbase_,
-              const bool dividebylivetime_)
+double getpar(TMinuit & mn, int i) // 0-indexed!
+{
+  double answer, dum;
+  mn.GetParameter(i, answer, dum);
+  return answer;
+}
+
+double geterr(TMinuit & mn, int i) // 0-indexed!
+{
+  double val, err;
+  mn.GetParameter(i, val, err);
+  return err;
+}
+
+void bumphunt(TH1D * hist, TH1D * histlive, const bool verbose)
+{
+  TMinuit mn(1);
+  mn.SetPrintLevel(-1);
+  mn.SetFCN(fcn);
+  int ierr;
+  mn.mnparm(0, "flat", 1e4, 1e2, 0, 0, ierr);
+
+  fithist = hist;
+  fithistlive = histlive;
+  mn.Command("MIGRAD");
+  const double flat = getpar(mn, 0);
+
+  toppad->cd();
+
+  TF1 * flatf = new TF1("flatf", "[0]", hist->GetBinLowEdge(1),
+                        hist->GetBinLowEdge(hist->GetNbinsX()+1));
+  flatf->SetParameter(0, flat);
+  flatf->SetLineColor(kRed);
+  flatf->SetLineWidth(2);
+  flatf->Draw("same");
+
+  if(verbose){
+    const int actual =
+      (int)hist->GetBinContent(hist->GetXaxis()->FindBin(0.5));
+    const double expected =
+      flat * histlive->GetBinContent(hist->GetXaxis()->FindBin(0.5));
+
+    printf("Events in 0-1s: %d, %.1f expected. Prob of this or more: %.3f\n",
+      actual, expected,
+      ROOT::Math::poisson_cdf_c(actual, expected));
+  }
+}
+
+void process_rebin(TH1D *hist, TH1D * histlive, const char * title,
+                   const int rebin)
+{
+  TH1D * rebinned = (TH1D*)hist->Rebin(rebin, "rebinned");
+  TH1D * rebinnedlive = histlive == NULL? NULL:
+    (TH1D*)histlive->Rebin(rebin, "rebinnedlive");
+
+  stylehist(rebinned, 0);
+  rebinned->GetYaxis()->SetTitle(Form("%s/s", title));
+
+  if(dividebylivetime){
+    TH1D * divided = divide_livetime(rebinned, rebinnedlive);
+
+    stylehist(divided, 1);
+    stylehist(rebinned, 2);
+    stylehist(rebinnedlive, 3);
+
+    divided ->GetYaxis()->SetTitle(Form("%s/s_{live}", title));
+    rebinned->GetYaxis()->SetTitle("Raw");
+
+    const double ytitleoff = 1.1;
+    divided     ->GetYaxis()->SetTitleOffset(ytitleoff);
+    rebinned    ->GetYaxis()->SetTitleOffset(ytitleoff/textratiomid);
+    rebinnedlive->GetYaxis()->SetTitleOffset(ytitleoff/textratiobot);
+
+    rebinnedlive->GetYaxis()->SetTitle("Livetime (%)");
+    rebinnedlive->Scale(100./rebin);
+
+    toppad->cd();
+    divided->Draw("e");
+
+    midpad->cd();
+    rebinned->Draw("e");
+
+    botpad->cd();
+    rebinnedlive->Draw("hist");
+
+    bumphunt(hist, histlive, rebin == 1);
+  }
+  else{
+    rebinned->Draw("e");
+  }
+
+  print2(Form("%s-%ds", hist->GetName(), rebin));
+}
+
+void process(TH1D * hist, TH1D * histlive, const char * const title)
+{
+  process_rebin(hist, histlive, title,  1);
+  process_rebin(hist, histlive, title, 10);
+}
+
+void ligopass2(const char * const infilename, const char * outbase_,
+               const bool dividebylivetime_)
 {
   outbase = outbase_;
   dividebylivetime = dividebylivetime_;
