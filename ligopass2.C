@@ -18,7 +18,7 @@ const char * outbase = NULL;
 
 TCanvas USN;
 TPad * botpad, * midpad, * toppad;
-const double divheight1 = 0.29, divheight2 = 0.50;
+const double divheight1 = 0.30, divheight2 = 0.51;
 // Thanks ROOT for making this hard
 const double textratiomid = (1-divheight2)/(divheight2 - divheight1);
 const double textratiobot = (1-divheight2)/divheight1;
@@ -221,14 +221,49 @@ void bumphunt(TH1D * hist, TH1D * histlive, const bool verbose)
   flatf->Draw("same");
 
   if(verbose){
-    const int actual =
-      (int)hist->GetBinContent(hist->GetXaxis()->FindBin(0.5));
-    const double expected =
-      flat * histlive->GetBinContent(hist->GetXaxis()->FindBin(0.5));
+    double minprob = 1;
+    double minprob_bin = 0;
+    for(int i = 1; i <= hist->GetNbinsX(); i++){
+      if(histlive->GetBinContent(i) == 0) continue;
 
-    printf("Events in 0-1s: %d, %.1f expected. Prob of this or more: %.3f\n",
-      actual, expected,
-      ROOT::Math::poisson_cdf_c(actual, expected));
+      const double expected = flat * histlive->GetBinContent(i);
+      const int actual = (int)hist->GetBinContent(i);
+
+      const double prob = ROOT::Math::poisson_cdf_c(actual, expected);
+      if(i == hist->GetXaxis()->FindBin(0.5))
+        printf("Events in 0-1s: %d, %.1f expected. Prob of this or more: %.2g\n",
+               actual, expected, prob);
+      if(prob < minprob){
+        minprob = prob;
+        minprob_bin = i;
+      }
+    }
+
+    const double expected = flat * histlive->GetBinContent(minprob_bin);
+    const int actual = (int)hist->GetBinContent(minprob_bin);
+
+    // This isn't quite right, because it could be more than 1.  Really what
+    // I mean is not to boost the probability, but to reduce the threshold for
+    // being surprised.  But this is easier to write.
+    const double corrprob_almostanywhere =
+      ROOT::Math::poisson_cdf_c(actual, expected) * (hist->GetNbinsX() - 1);
+
+    printf("Biggest excess: %d - %ds: %d obs, %.1f expected. "
+           "Prob of this or more somewhere: %.2g\n",
+           (int)hist->GetBinLowEdge(minprob_bin),
+           (int)hist->GetBinLowEdge(minprob_bin+1),
+           actual, expected, corrprob_almostanywhere);
+
+    // We'll consider the first N seconds after the event to be special
+    const int nearlybins = 10;
+    if(minprob_bin >= hist->GetXaxis()->FindBin(0.5) &&
+       minprob_bin <  hist->GetXaxis()->FindBin(0.5)+nearlybins){
+
+      const double corrprob_early =
+        ROOT::Math::poisson_cdf_c(actual, expected) * nearlybins;
+      printf("In fact, this was in 0-%ds. Prob of this: %.2g\n",
+             nearlybins, corrprob_early);
+    }
   }
 }
 
