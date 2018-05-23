@@ -1,3 +1,4 @@
+#include "TLatex.h"
 #include "TMinuit.h"
 #include "Math/Math.h"
 #include "Math/ProbFuncMathCore.h"
@@ -11,17 +12,22 @@
 #include "TAxis.h"
 #include "TStyle.h"
 
-const double textsize = 0.06;
+const double textsize = 0.0666;
 
 bool dividebylivetime = false;
 const char * outbase = NULL;
 
 TCanvas USN;
 TPad * botpad, * midpad, * toppad;
-const double divheight1 = 0.30, divheight2 = 0.51;
+const double divheight1 = 0.26, divheight2 = 0.47;
+
 // Thanks ROOT for making this hard
+// Ratio of top pane to middle pane
 const double textratiomid = (1-divheight2)/(divheight2 - divheight1);
+// Ratio of top pane to bottom pane
 const double textratiobot = (1-divheight2)/divheight1;
+// Ratio of top pane to whole canvas
+const double textratiofull = (1-divheight2);
 
 TH1D * getordont(const char * const histname, TDirectory * const ligofile)
 {
@@ -49,18 +55,20 @@ void stylehist(TH1D * h, const int can /* 0: full, 1: top, 2: mid, 3: bot */)
   TAxis* y = h->GetYaxis();
   TAxis* x = h->GetXaxis();
 
-  y->SetTitleOffset(1.45);
+  y->SetTitleOffset(textsize/0.04);
 
   h->SetLineColor(kBlack);
   h->SetMarkerColor(kBlack);
+
+  h->SetLineWidth(2);
 
   y->CenterTitle();
   x->CenterTitle();
 
   const double siz = can == 0? textsize:
-    can == 1? textsize*1.333:
-    can == 2? textsize*1.333*textratiomid:
-              textsize*1.333*textratiobot;
+    can == 1? textsize:
+    can == 2? textsize*textratiomid:
+              textsize*textratiobot;
 
   x->SetLabelSize(siz);
   y->SetLabelSize(siz);
@@ -79,18 +87,18 @@ void stylehist(TH1D * h, const int can /* 0: full, 1: top, 2: mid, 3: bot */)
   }
 }
 
+const double leftmargin = 0.12 * textsize/0.06;
+const double rightmargin = 0.03;
+
 void stylepad(TPad * pad)
 {
-  const float leftmargin = 0.2;
-
   pad->SetBorderMode(0);
   pad->SetBorderSize(2);
   pad->SetTickx(1);
   pad->SetTicky(1);
   pad->SetFrameLineWidth(2);
-  pad->SetFrameBorderMode(0);
+  pad->SetRightMargin(rightmargin);
   pad->SetLeftMargin(leftmargin);
-  pad->SetRightMargin(0.03);
 }
 
 void stylecanvas(TCanvas * c)
@@ -101,11 +109,6 @@ void stylecanvas(TCanvas * c)
   const double scale = 5.0;
   c->SetCanvasSize(100*scale, 100*scale);
 
-  c->  SetLeftMargin(0.20);
-  c-> SetRightMargin(0.01);
-  c->   SetTopMargin(0.06);
-  c->SetBottomMargin(0.13);
-
   if(dividebylivetime){
     toppad = new TPad("div", "div", 0, divheight2, 1,          1);
     midpad = new TPad("raw", "raw", 0, divheight1, 1, divheight2);
@@ -114,7 +117,7 @@ void stylecanvas(TCanvas * c)
     stylepad(midpad);
     stylepad(botpad);
 
-    const double topmargin = 0.09;
+    const double topmargin = 0.09 * textsize/0.07;
 
     toppad->SetTopMargin(topmargin);
     toppad->SetBottomMargin(0);
@@ -123,12 +126,7 @@ void stylecanvas(TCanvas * c)
     midpad->SetTopMargin(0);
 
     botpad->SetTopMargin(0);
-    botpad->SetBottomMargin(0.28);
-
-    const double pleftmargin = 0.19;
-    toppad->SetLeftMargin(pleftmargin);
-    botpad->SetLeftMargin(pleftmargin);
-    midpad->SetLeftMargin(pleftmargin);
+    botpad->SetBottomMargin(0.078/divheight1);
 
     toppad->Draw();
     botpad->Draw();
@@ -204,19 +202,21 @@ void bumphunt(TH1D * hist, TH1D * histlive, const bool verbose)
   mn.SetPrintLevel(-1);
   mn.SetFCN(fcn);
   int ierr;
-  mn.mnparm(0, "flat", 1e4, 1e2, 0, 0, ierr);
+  mn.mnparm(0, "flat", hist->Integral()/hist->GetNbinsX(), 10, 0, 0, ierr);
 
   fithist = hist;
   fithistlive = histlive;
+  mn.Command("SET STRATEGY 2");
   mn.Command("MIGRAD");
   const double flat = getpar(mn, 0);
 
   toppad->cd();
 
-  TF1 * flatf = new TF1("flatf", "[0]", hist->GetBinLowEdge(1),
+  static TF1 * flatf = new TF1("flatf", "[0]", hist->GetBinLowEdge(1),
                         hist->GetBinLowEdge(hist->GetNbinsX()+1));
   flatf->SetParameter(0, flat);
   flatf->SetLineColor(kRed);
+  flatf->SetNpx(500);
   flatf->SetLineWidth(2);
   flatf->Draw("same");
 
@@ -267,6 +267,19 @@ void bumphunt(TH1D * hist, TH1D * histlive, const bool verbose)
   }
 }
 
+void novapreliminary()
+{
+  static TLatex * t = new TLatex(0, 0, "NOvA Preliminary");
+  t->SetTextColor(kBlue);
+  t->SetTextSize(textsize*textratiofull);
+  t->SetTextFont(42);
+  t->SetNDC();
+  t->SetTextAlign(32);
+  t->SetX(1-rightmargin-0.005);
+  t->SetY(0.978);
+  t->Draw();
+}
+
 void process_rebin(TH1D *hist, TH1D * histlive, const char * title,
                    const int rebin)
 {
@@ -275,7 +288,21 @@ void process_rebin(TH1D *hist, TH1D * histlive, const char * title,
     (TH1D*)histlive->Rebin(rebin, "rebinnedlive");
 
   stylehist(rebinned, 0);
-  rebinned->GetYaxis()->SetTitle(Form("%s/s", title));
+
+  const bool preliminary = true;
+
+  // Some trickery (static) here needed to avoid getting the first label stuck
+  // on all the output PDFs.
+  static TLatex * ltitle = new TLatex;
+  ltitle->SetText(0.5 + leftmargin/2 - rightmargin/2
+                  - preliminary * 0.1, 0.978, title);
+  ltitle->SetTextSize(textsize*textratiofull);
+  ltitle->SetTextFont(42);
+  ltitle->SetTextAlign(22);
+  ltitle->SetNDC();
+  ltitle->Draw();
+
+  novapreliminary();
 
   if(dividebylivetime){
     TH1D * divided = divide_livetime(rebinned, rebinnedlive);
@@ -284,13 +311,19 @@ void process_rebin(TH1D *hist, TH1D * histlive, const char * title,
     stylehist(rebinned, 2);
     stylehist(rebinnedlive, 3);
 
-    divided ->GetYaxis()->SetTitle(Form("%s/s_{live}", title));
+    divided ->GetYaxis()->SetTitle("Events/s");
     rebinned->GetYaxis()->SetTitle("Raw");
 
-    const double ytitleoff = 1.1;
+    const double ytitleoff = 1.1 / sqrt(textsize/0.05);
     divided     ->GetYaxis()->SetTitleOffset(ytitleoff);
     rebinned    ->GetYaxis()->SetTitleOffset(ytitleoff/textratiomid);
     rebinnedlive->GetYaxis()->SetTitleOffset(ytitleoff/textratiobot);
+
+    divided->GetYaxis()->SetRangeUser(0.001, divided->GetMaximum() +
+      std::max(divided->GetMaximum()/10, divided->GetBinError(divided->GetMaximumBin())*1.5));
+
+    rebinned->GetYaxis()->SetRangeUser(0.001, rebinned->GetMaximum() +
+      std::max(rebinned->GetMaximum()/10, rebinned->GetBinError(rebinned->GetMaximumBin())*1.5));
 
     rebinnedlive->GetYaxis()->SetTitle("Livetime (%)");
     rebinnedlive->Scale(100./rebin);
