@@ -385,10 +385,14 @@ void ligopass2(const char * const infilename, const char * outbase_,
   GETORDONT(rawhits,               "Raw hits");
   GETORDONT(unslice4ddhits,        "Hits in the noise slice");
   GETORDONT(tracks,                "Slices with tracks");
-  GETORDONT(halfcontained_tracks,  "Slices with stopping tracks");
-  GETORDONT(fullycontained_tracks, "Slices with contained tracks");
+  GETORDONT(fullycontained_tracks, "Contained tracks");
+  GETORDONT(fullycontained_tracks_point_0, "Contained tracks, tight pointing");
+  GETORDONT(fullycontained_tracks_point_1, "Contained tracks, loose pointing");
   GETORDONT(contained_slices,      "Contained slices");
   GETORDONT(unslicedbighits,       "Unsliced big hits");
+  GETORDONT(halfcontained_tracks,  "Stopping tracks");
+  GETORDONT(halfcontained_tracks_point_0, "Stopping tracks, tight pointing");
+  GETORDONT(halfcontained_tracks_point_1, "Stopping tracks, loose pointing");
   GETORDONT(unslicedhitpairs,      "Supernova-like events");
   GETORDONT(upmu_tracks,           "Upward going muons");
   GETORDONT(energy_low_cut,        "Very high energy triggers");
