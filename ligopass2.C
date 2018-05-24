@@ -319,11 +319,13 @@ void process_rebin(TH1D *hist, TH1D * histlive, const char * title,
     rebinned    ->GetYaxis()->SetTitleOffset(ytitleoff/textratiomid);
     rebinnedlive->GetYaxis()->SetTitleOffset(ytitleoff/textratiobot);
 
-    divided->GetYaxis()->SetRangeUser(0.001, divided->GetMaximum() +
-      std::max(divided->GetMaximum()/10, divided->GetBinError(divided->GetMaximumBin())*1.5));
+    if(rebinned->Integral() > 0){
+      divided->GetYaxis()->SetRangeUser(0.001, divided->GetMaximum() +
+        std::max(divided->GetMaximum()/10, divided->GetBinError(divided->GetMaximumBin())*1.5));
 
-    rebinned->GetYaxis()->SetRangeUser(0.001, rebinned->GetMaximum() +
-      std::max(rebinned->GetMaximum()/10, rebinned->GetBinError(rebinned->GetMaximumBin())*1.5));
+      rebinned->GetYaxis()->SetRangeUser(0.001, rebinned->GetMaximum() +
+        std::max(rebinned->GetMaximum()/10, rebinned->GetBinError(rebinned->GetMaximumBin())*1.5));
+    }
 
     rebinnedlive->GetYaxis()->SetTitle("Livetime (%)");
     rebinnedlive->Scale(100./rebin);
@@ -374,9 +376,10 @@ void ligopass2(const char * const infilename, const char * outbase_,
 
   stylecanvas(&USN);
 
-  #define GETORDONT(x, y) TH1D * x = getordont(#x, ligodir); \
-                          TH1D * x##live = getordont(#x"live", ligodir); \
-                          if(x != NULL) process(x, x##live, y)
+  #define GETORDONT(hname, title) \
+    TH1D * hname = getordont(#hname, ligodir); \
+    TH1D * hname##live = getordont(#hname"live", ligodir); \
+    if(hname != NULL) process(hname, hname##live, title)
 
   GETORDONT(rawtrigger,            "Raw triggers");
   GETORDONT(rawhits,               "Raw hits");
