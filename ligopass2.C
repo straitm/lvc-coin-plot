@@ -85,6 +85,8 @@ void stylehist(TH1D * h, const int can /* 0: full, 1: top, 2: mid, 3: bot */)
   if(effectivecount(h) < h->GetNbinsX()){
     h->SetMarkerStyle(kOpenCircle);
   }
+
+  if(h->GetEntries() < 10) y->SetNdivisions(h->GetEntries());
 }
 
 const double leftmargin = 0.12 * textsize/0.06;
@@ -374,6 +376,8 @@ void process_rebin(TH1D *hist, TH1D * histlive, const char * title,
     bumphunt(hist, histlive, rebin == 1);
   }
   else{
+    rebinned->GetYaxis()->SetTitleOffset(
+      (rebinned->GetEntries() < 10? 0.8: 1.1) / sqrt(textsize/0.05));
     rebinned->GetYaxis()->SetTitle("Events/s");
     rebinned->Draw("e");
     if(preliminary) novapreliminary();
