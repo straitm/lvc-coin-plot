@@ -1,3 +1,5 @@
+#include "TGaxis.h"
+#include "TError.h"
 #include "TLatex.h"
 #include "TMinuit.h"
 #include "Math/Math.h"
@@ -55,8 +57,6 @@ void stylehist(TH1D * h, const int can /* 0: full, 1: top, 2: mid, 3: bot */)
   TAxis* y = h->GetYaxis();
   TAxis* x = h->GetXaxis();
 
-  y->SetTitleOffset(textsize/0.04);
-
   h->SetLineColor(kBlack);
   h->SetMarkerColor(kBlack);
 
@@ -78,7 +78,7 @@ void stylehist(TH1D * h, const int can /* 0: full, 1: top, 2: mid, 3: bot */)
   x->SetTickSize(0.03);
   y->SetTickSize(0.015);
 
-  x->SetTitle("Time since GW event (s)");
+  x->SetTitle("Time since event (s)");
   x->SetNdivisions(508);
   y->SetNdivisions(can == 0?510: can == 1? 508: 504);
 
@@ -107,7 +107,7 @@ void stylecanvas(TCanvas * c)
   gStyle->SetOptStat(0);
 
   const double scale = 5.0;
-  c->SetCanvasSize(100*scale, 100*scale);
+  c->SetCanvasSize(100*scale + (!dividebylivetime)*50*scale, 100*scale);
 
   if(dividebylivetime){
     toppad = new TPad("div", "div", 0, divheight2, 1,          1);
@@ -131,6 +131,11 @@ void stylecanvas(TCanvas * c)
     toppad->Draw();
     botpad->Draw();
     midpad->Draw();
+  }
+  else{
+   c->SetBottomMargin(0.14);
+   c->SetLeftMargin(0.14);
+   c->SetRightMargin(0.02);
   }
 }
 
@@ -208,7 +213,7 @@ void bumphunt(TH1D * hist, TH1D * histlive, const bool verbose)
   fithistlive = histlive;
   mn.Command("SET STRATEGY 2");
   mn.Command("MIGRAD");
-  const double flat = getpar(mn, 0);
+  const double flat = hist->Integral() == 0? 0: getpar(mn, 0);
 
   toppad->cd();
 
@@ -267,17 +272,40 @@ void bumphunt(TH1D * hist, TH1D * histlive, const bool verbose)
   }
 }
 
+void randomtime()
+{
+  static TLatex * t = new TLatex(0, 0, "Random Timestamp");
+  t->SetTextColorAlpha(kGray, 0.5);
+  t->SetTextSize(textsize*textratiofull*2.5);
+  t->SetTextFont(42);
+  t->SetNDC();
+  t->SetTextAlign(22);
+  t->SetX(0.5);
+  t->SetY(0.5);
+  t->SetTextAngle(55);
+  t->Draw();
+}
+
 void novapreliminary()
 {
   static TLatex * t = new TLatex(0, 0, "NOvA Preliminary");
   t->SetTextColor(kBlue);
-  t->SetTextSize(textsize*textratiofull);
+  t->SetTextSize(dividebylivetime?textsize*textratiofull:textsize);
   t->SetTextFont(42);
   t->SetNDC();
   t->SetTextAlign(32);
   t->SetX(1-rightmargin-0.005);
-  t->SetY(0.978);
+  t->SetY(0.978 - (!dividebylivetime)*0.02);
   t->Draw();
+}
+
+static void zoomhist(TH1 * h)
+{
+  return;
+  printf("%f\n", gPad->GetUymin());
+  if(gPad->GetUymin() > 0) return;
+  const double max = gPad->GetUymax();
+  h->GetYaxis()->SetRangeUser(0.01, max);
 }
 
 void process_rebin(TH1D *hist, TH1D * histlive, const char * title,
@@ -294,18 +322,29 @@ void process_rebin(TH1D *hist, TH1D * histlive, const char * title,
   // Some trickery (static) here needed to avoid getting the first label stuck
   // on all the output PDFs.
   static TLatex * ltitle = new TLatex;
-  ltitle->SetText(0.5 + leftmargin/2 - rightmargin/2
-                  - preliminary * 0.1, 0.978, title);
-  ltitle->SetTextSize(textsize*textratiofull);
+  ltitle->SetText(
+    0.5 + leftmargin/2 - rightmargin/2 - preliminary * 0.2,
+    0.978 - (!dividebylivetime)*0.02, title);
+  ltitle->SetTextSize(dividebylivetime?textsize*textratiofull:textsize);
   ltitle->SetTextFont(42);
   ltitle->SetTextAlign(22);
   ltitle->SetNDC();
   ltitle->Draw();
 
-  novapreliminary();
+  if(preliminary) novapreliminary();
+  randomtime();
+
+  if(rebin == 1){
+    rebinned->GetXaxis()->SetRangeUser(-100, 100);
+    if(rebinnedlive != NULL) rebinnedlive->GetXaxis()->SetRangeUser(-100, 100);
+  }
+
+  zoomhist(rebinned);
 
   if(dividebylivetime){
     TH1D * divided = divide_livetime(rebinned, rebinnedlive);
+    if(rebin == 1) divided->GetXaxis()->SetRangeUser(-100, 100);
+    zoomhist(divided);
 
     stylehist(divided, 1);
     stylehist(rebinned, 2);
@@ -319,16 +358,9 @@ void process_rebin(TH1D *hist, TH1D * histlive, const char * title,
     rebinned    ->GetYaxis()->SetTitleOffset(ytitleoff/textratiomid);
     rebinnedlive->GetYaxis()->SetTitleOffset(ytitleoff/textratiobot);
 
-    if(rebinned->Integral() > 0){
-      divided->GetYaxis()->SetRangeUser(0.001, divided->GetMaximum() +
-        std::max(divided->GetMaximum()/10, divided->GetBinError(divided->GetMaximumBin())*1.5));
-
-      rebinned->GetYaxis()->SetRangeUser(0.001, rebinned->GetMaximum() +
-        std::max(rebinned->GetMaximum()/10, rebinned->GetBinError(rebinned->GetMaximumBin())*1.5));
-    }
-
     rebinnedlive->GetYaxis()->SetTitle("Livetime (%)");
     rebinnedlive->Scale(100./rebin);
+    rebinnedlive->GetYaxis()->SetRangeUser(0, 0.7);
 
     toppad->cd();
     divided->Draw("e");
@@ -337,12 +369,16 @@ void process_rebin(TH1D *hist, TH1D * histlive, const char * title,
     rebinned->Draw("e");
 
     botpad->cd();
-    rebinnedlive->Draw("hist");
+    rebinnedlive->Draw("hist][");
 
     bumphunt(hist, histlive, rebin == 1);
   }
   else{
+    rebinned->GetYaxis()->SetTitle("Events/s");
     rebinned->Draw("e");
+    if(preliminary) novapreliminary();
+    randomtime();
+    ltitle->Draw();
   }
 
   print2(Form("%s-%ds", hist->GetName(), rebin));
@@ -350,6 +386,7 @@ void process_rebin(TH1D *hist, TH1D * histlive, const char * title,
 
 void process(TH1D * hist, TH1D * histlive, const char * const title)
 {
+  printf("\n%s:\n", title);
   process_rebin(hist, histlive, title,  1);
   process_rebin(hist, histlive, title, 10);
 }
@@ -359,6 +396,9 @@ void ligopass2(const char * const infilename, const char * outbase_,
 {
   outbase = outbase_;
   dividebylivetime = dividebylivetime_;
+
+  // Don't print about making PDFs
+  gErrorIgnoreLevel = kWarning;
 
   TFile * ligofile = new TFile(infilename, "read");
   if(!ligofile || ligofile->IsZombie()){
@@ -395,8 +435,8 @@ void ligopass2(const char * const infilename, const char * outbase_,
   GETORDONT(halfcontained_tracks_point_1, "Stopping tracks, loose pointing");
   GETORDONT(unslicedhitpairs,      "Supernova-like events");
   GETORDONT(upmu_tracks,           "Upward going muons");
-  GETORDONT(energy_low_cut,        "Very high energy triggers");
-  GETORDONT(energy_high_cut,       "Very very high energy triggers");
-  GETORDONT(energy_low_cut_pertime,"Very high power events");
-  GETORDONT(energy_high_cut_pertime,"Very very high power events");
+  GETORDONT(energy_low_cut,        "High energy triggers");
+  GETORDONT(energy_high_cut,       "Very high energy triggers");
+  GETORDONT(energy_low_cut_pertime,"High energy events");
+  GETORDONT(energy_high_cut_pertime,"Very high energy events");
 }
