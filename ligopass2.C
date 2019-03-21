@@ -17,6 +17,7 @@
 const double textsize = 0.0666;
 
 bool dividebylivetime = false;
+bool longreadout = false;
 const char * outbase = NULL;
 
 TCanvas USN;
@@ -167,17 +168,17 @@ void print2(const char * const name)
 
 
 TH1D * fithist = NULL, * fithistlive = NULL;
-static void fcn(__attribute__((unused)) int & np,
-  __attribute__((unused)) double * gin, double & like, double *par,
-  __attribute__((unused)) int flag)
-{
+static void fcn(int & np, __attribute__((unused)) double * gin, double & like,
+                double *par, __attribute__((unused)) int flag)
+{ 
   like = 0;
 
-  const double flat = par[0];
-
   for(int i = 1; i <= fithist->GetNbinsX(); i++){
+    double model = 0;
+    for(int p = 0; p < np; p++)
+      model += par[p] * pow(fithist->GetBinCenter(i), p);
+    model *= fithistlive->GetBinContent(i);
 
-    const double model = flat * fithistlive->GetBinContent(i);
     const double data = fithist->GetBinContent(i);
 
     if(model > 0){
@@ -203,13 +204,15 @@ double geterr(TMinuit & mn, int i) // 0-indexed!
   return err;
 }
 
-void bumphunt(TH1D * hist, TH1D * histlive, const bool verbose)
+void bumphunt(TH1D * hist, TH1D * histlive, const bool verbose, const unsigned int polyorder)
 {
-  TMinuit mn(1);
-  mn.SetPrintLevel(-1);
+  TMinuit mn(polyorder+1);
+  mn.SetPrintLevel(0); // -1 to be quiet
   mn.SetFCN(fcn);
   int ierr;
-  mn.mnparm(0, "flat", hist->Integral()/hist->GetNbinsX(), 10, 0, 0, ierr);
+  mn.mnparm(0, "flat", 1, 10, 0, 0, ierr);
+  for(unsigned int i = 1; i <= polyorder; i++)
+    mn.mnparm(i, Form("p%d", i), 0, 1, 0, 0, ierr);
 
   fithist = hist;
   fithistlive = histlive;
@@ -219,13 +222,21 @@ void bumphunt(TH1D * hist, TH1D * histlive, const bool verbose)
 
   toppad->cd();
 
-  static TF1 * flatf = new TF1("flatf", "[0]", hist->GetBinLowEdge(1),
-                        hist->GetBinLowEdge(hist->GetNbinsX()+1));
-  flatf->SetParameter(0, flat);
-  flatf->SetLineColor(kRed);
-  flatf->SetNpx(500);
-  flatf->SetLineWidth(2);
-  flatf->Draw("same");
+  string fs = "[0]";
+  for(unsigned int i = 1; i <= polyorder; i++)
+    fs += Form("+[%d]*pow(x, %d)", polyorder, polyorder);
+
+  static TF1 * poly =
+    new TF1("poly", fs.c_str(), hist->GetBinLowEdge(1),
+                                hist->GetBinLowEdge(hist->GetNbinsX()+1));
+
+  for(unsigned int i = 0; i <= polyorder; i++)
+    poly->SetParameter(i, getpar(mn, i));
+  poly->SavePrimitive(cout);
+  poly->SetLineColor(kRed);
+  poly->SetNpx(500);
+  poly->SetLineWidth(2);
+  poly->Draw("same");
 
   if(verbose){
     double minprob = 1;
@@ -238,7 +249,7 @@ void bumphunt(TH1D * hist, TH1D * histlive, const bool verbose)
 
       const double prob = ROOT::Math::poisson_cdf_c(actual, expected);
       if(i == hist->GetXaxis()->FindBin(0.5))
-        printf("Events in 0-1s: %d, %.1f expected. Prob of this or more: %.2g\n",
+        printf("Events in 0-1s: %d, %.3f expected. Prob of this or more: %.2g\n",
                actual, expected, prob);
       if(prob < minprob){
         minprob = prob;
@@ -255,7 +266,7 @@ void bumphunt(TH1D * hist, TH1D * histlive, const bool verbose)
     const double corrprob_almostanywhere =
       ROOT::Math::poisson_cdf_c(actual, expected) * (hist->GetNbinsX() - 1);
 
-    printf("Biggest excess: %d - %ds: %d obs, %.1f expected. "
+    printf("Biggest excess: {%d, %d}s: %d obs, %.1f expected. "
            "Prob of this or more somewhere: %.2g\n",
            (int)hist->GetBinLowEdge(minprob_bin),
            (int)hist->GetBinLowEdge(minprob_bin+1),
@@ -276,7 +287,7 @@ void bumphunt(TH1D * hist, TH1D * histlive, const bool verbose)
 
 void randomtime()
 {
-  static TLatex * t = new TLatex(0, 0, "Random Timestamp");
+  static TLatex * t = new TLatex(0, 0, "Around 8:30 SNEWS Test");
   t->SetTextColorAlpha(kGray, 0.5);
   t->SetTextSize(textsize*textratiofull*2.5);
   t->SetTextFont(42);
@@ -301,17 +312,10 @@ void novapreliminary()
   t->Draw();
 }
 
-static void zoomhist(TH1 * h)
-{
-  return;
-  printf("%f\n", gPad->GetUymin());
-  if(gPad->GetUymin() > 0) return;
-  const double max = gPad->GetUymax();
-  h->GetYaxis()->SetRangeUser(0.01, max);
-}
-
+// polyorder: order of the polynominal to fit for the no-signal hypothesis.
+//            Naively, zero.  For anything with pointing, at least 1.
 void process_rebin(TH1D *hist, TH1D * histlive, const char * title,
-                   const int rebin)
+                   const int rebin, const unsigned int polyorder)
 {
   TH1D * rebinned = (TH1D*)hist->Rebin(rebin, "rebinned");
   TH1D * rebinnedlive = histlive == NULL? NULL:
@@ -325,7 +329,7 @@ void process_rebin(TH1D *hist, TH1D * histlive, const char * title,
   // on all the output PDFs.
   static TLatex * ltitle = new TLatex;
   ltitle->SetText(
-    0.5 + leftmargin/2 - rightmargin/2 - preliminary * 0.2,
+    0.53 + leftmargin/2 - rightmargin/2 - preliminary * 0.2,
     0.978 - (!dividebylivetime)*0.02, title);
   ltitle->SetTextSize(dividebylivetime?textsize*textratiofull:textsize);
   ltitle->SetTextFont(42);
@@ -336,17 +340,18 @@ void process_rebin(TH1D *hist, TH1D * histlive, const char * title,
   if(preliminary) novapreliminary();
   randomtime();
 
-  if(rebin == 1){
-    rebinned->GetXaxis()->SetRangeUser(-100, 100);
-    if(rebinnedlive != NULL) rebinnedlive->GetXaxis()->SetRangeUser(-100, 100);
+  double mint = 0, maxt = 0;
+
+  if(longreadout && rebin == 1){
+    mint = -10, maxt = 45;
+    rebinned->GetXaxis()->SetRangeUser(mint, maxt);
+    if(rebinnedlive != NULL) rebinnedlive->GetXaxis()->SetRangeUser(mint, maxt);
   }
 
-  zoomhist(rebinned);
 
   if(dividebylivetime){
     TH1D * divided = divide_livetime(rebinned, rebinnedlive);
-    if(rebin == 1) divided->GetXaxis()->SetRangeUser(-100, 100);
-    zoomhist(divided);
+    if(rebin == 1) divided->GetXaxis()->SetRangeUser(mint, maxt);
 
     stylehist(divided, 1);
     stylehist(rebinned, 2);
@@ -362,18 +367,26 @@ void process_rebin(TH1D *hist, TH1D * histlive, const char * title,
 
     rebinnedlive->GetYaxis()->SetTitle("Livetime (%)");
     rebinnedlive->Scale(100./rebin);
-    rebinnedlive->GetYaxis()->SetRangeUser(0, 0.7);
+    rebinnedlive->GetYaxis()->SetRangeUser(0, rebinnedlive->GetMaximum()*1.2);
 
     toppad->cd();
     divided->Draw("e");
+    if(toppad->GetUymin() == 0){
+      printf("suppressing zero for %s\n", hist->GetName());
+      divided->GetYaxis()->SetRangeUser(divided->GetMaximum()*1e-4, (divided->GetMaximum()+divided->GetBinError(divided->GetMaximumBin()))*1.1);
+    }
 
     midpad->cd();
     rebinned->Draw("e");
+    if(midpad->GetUymin() == 0){
+      printf("suppressing zero for %s\n", hist->GetName());
+      rebinned->GetYaxis()->SetRangeUser(rebinned->GetMaximum()*1e-4, (rebinned->GetMaximum()+rebinned->GetBinError(rebinned->GetMaximumBin()))*1.1);
+    }
 
     botpad->cd();
-    rebinnedlive->Draw("hist][");
+    rebinnedlive->Draw("hist");
 
-    bumphunt(hist, histlive, rebin == 1);
+    bumphunt(hist, histlive, rebin == 1, polyorder);
   }
   else{
     rebinned->GetYaxis()->SetTitleOffset(
@@ -388,18 +401,20 @@ void process_rebin(TH1D *hist, TH1D * histlive, const char * title,
   print2(Form("%s-%ds", hist->GetName(), rebin));
 }
 
-void process(TH1D * hist, TH1D * histlive, const char * const title)
+void process(TH1D * hist, TH1D * histlive, const char * const title,
+             const unsigned int polyorder)
 {
   printf("\n%s:\n", title);
-  process_rebin(hist, histlive, title,  1);
-  process_rebin(hist, histlive, title, 10);
+  process_rebin(hist, histlive, title,  1, polyorder);
+  process_rebin(hist, histlive, title, 10, polyorder);
 }
 
 void ligopass2(const char * const infilename, const char * outbase_,
-               const bool dividebylivetime_)
+               const bool dividebylivetime_, const bool longreadout_)
 {
   outbase = outbase_;
   dividebylivetime = dividebylivetime_;
+  longreadout = longreadout_;
 
   // Don't print about making PDFs
   gErrorIgnoreLevel = kWarning;
@@ -420,27 +435,31 @@ void ligopass2(const char * const infilename, const char * outbase_,
 
   stylecanvas(&USN);
 
-  #define GETORDONT(hname, title) \
+  #define GETORDONT(hname, title, polyorder) \
     TH1D * hname = getordont(#hname, ligodir); \
     TH1D * hname##live = getordont(#hname"live", ligodir); \
-    if(hname != NULL) process(hname, hname##live, title)
+    if(hname != NULL && hname##live != NULL) process(hname, hname##live, title, polyorder)
 
-  GETORDONT(rawtrigger,            "Raw triggers");
-  GETORDONT(rawhits,               "Raw hits");
-  GETORDONT(unslice4ddhits,        "Hits in the noise slice");
-  GETORDONT(tracks,                "Slices with tracks");
-  GETORDONT(fullycontained_tracks, "Contained tracks");
-  GETORDONT(fullycontained_tracks_point_0, "Contained tracks, tight pointing");
-  GETORDONT(fullycontained_tracks_point_1, "Contained tracks, loose pointing");
-  GETORDONT(contained_slices,      "Contained slices");
-  GETORDONT(unslicedbighits,       "Unsliced big hits");
-  GETORDONT(halfcontained_tracks,  "Stopping tracks");
-  GETORDONT(halfcontained_tracks_point_0, "Stopping tracks, tight pointing");
-  GETORDONT(halfcontained_tracks_point_1, "Stopping tracks, loose pointing");
-  GETORDONT(unslicedhitpairs,      "Supernova-like events");
-  GETORDONT(upmu_tracks,           "Upward going muons");
-  GETORDONT(energy_low_cut,        "High energy triggers");
-  GETORDONT(energy_high_cut,       "Very high energy triggers");
-  GETORDONT(energy_low_cut_pertime,"High energy events");
-  GETORDONT(energy_high_cut_pertime,"Very high energy events");
+  GETORDONT(rawtrigger,            "Raw triggers", 0);
+  GETORDONT(rawhits,               "Raw hits", 0);
+  GETORDONT(unslicedbighits,       "Unsliced big hits", 0);
+  GETORDONT(unslice4ddhits,        "Hits in the noise slice", 0);
+  GETORDONT(tracks,                "Slices with tracks", 0);
+  GETORDONT(tracks_point_0,        "Slices with tracks, tight pointing", 1);
+  GETORDONT(tracks_point_1,        "Slices with tracks, loose pointing", 1);
+  GETORDONT(fullycontained_tracks, "Contained tracks", 0);
+  GETORDONT(fullycontained_tracks_point_0, "Contained tracks, tight pointing", 1);
+  GETORDONT(fullycontained_tracks_point_1, "Contained tracks, loose pointing", 1);
+  GETORDONT(contained_slices,      "Contained slices", 0);
+  GETORDONT(halfcontained_tracks,  "Stopping tracks", 0);
+  GETORDONT(halfcontained_tracks_point_0, "Stopping tracks, tight pointing", 1);
+  GETORDONT(halfcontained_tracks_point_1, "Stopping tracks, loose pointing", 1);
+  GETORDONT(unslicedhitpairs,      "Supernova-like events", 0);
+  GETORDONT(upmu_tracks,           "Upward going muons", 0);
+  GETORDONT(upmu_tracks_point_0,   "Upward going muons, tight pointing", 1);
+  GETORDONT(upmu_tracks_point_1,   "Upward going muons, loose pointing", 1);
+  GETORDONT(energy_low_cut,        "High energy triggers", 0);
+  GETORDONT(energy_high_cut,       "Very high energy triggers", 0);
+  GETORDONT(energy_low_cut_pertime,"High energy events", 0);
+  GETORDONT(energy_high_cut_pertime,"Very high energy events", 0);
 }
