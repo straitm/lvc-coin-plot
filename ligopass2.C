@@ -14,6 +14,23 @@
 #include "TAxis.h"
 #include "TStyle.h"
 
+struct popts{
+  const char * name;
+
+  // What order polynominal to fit the background time series to
+  unsigned int polyorder;
+
+  // Whether to run statistical tests on deviations from background
+  bool stattest;
+
+  popts(const char * const name_, const unsigned int polyorder_, const bool stattest_)
+  {
+    name = name_;
+    polyorder = polyorder_;
+    stattest = stattest_;
+  }
+};
+
 const double textsize = 0.0666;
 
 bool dividebylivetime = false;
@@ -175,8 +192,13 @@ static void fcn(int & np, __attribute__((unused)) double * gin, double & like,
 
   for(int i = 1; i <= fithist->GetNbinsX(); i++){
     double model = 0;
-    for(int p = 0; p < np; p++)
-      model += par[p] * pow(fithist->GetBinCenter(i), p);
+    for(int p = 0; p < np; p++){
+      // Avoid warning about the function value not depending on the parameters
+      // when fitting to a constant.
+      const double pr = np == 1 ? fabs(par[p]): par[p];
+
+      model += pr * pow(fithist->GetBinCenter(i), p);
+    }
     model *= fithistlive->GetBinContent(i);
 
     const double data = fithist->GetBinContent(i);
@@ -187,7 +209,7 @@ static void fcn(int & np, __attribute__((unused)) double * gin, double & like,
     }
   }
 
-  like *= 2;
+  like *= 2; // Make chi2-like.  Alternatively could SET UP or whatever
 }
 
 double getpar(TMinuit & mn, int i) // 0-indexed!
@@ -207,7 +229,7 @@ double geterr(TMinuit & mn, int i) // 0-indexed!
 void bumphunt(TH1D * hist, TH1D * histlive, const bool verbose, const unsigned int polyorder)
 {
   TMinuit mn(polyorder+1);
-  mn.SetPrintLevel(0); // -1 to be quiet
+  mn.SetPrintLevel(-1);
   mn.SetFCN(fcn);
   int ierr;
   mn.mnparm(0, "flat", 1, 10, 0, 0, ierr);
@@ -217,8 +239,7 @@ void bumphunt(TH1D * hist, TH1D * histlive, const bool verbose, const unsigned i
   fithist = hist;
   fithistlive = histlive;
   mn.Command("SET STRATEGY 2");
-  mn.Command("MIGRAD");
-  const double flat = hist->Integral() == 0? 0: getpar(mn, 0);
+  mn.Command("MINIMIZE");
 
   toppad->cd();
 
@@ -226,13 +247,12 @@ void bumphunt(TH1D * hist, TH1D * histlive, const bool verbose, const unsigned i
   for(unsigned int i = 1; i <= polyorder; i++)
     fs += Form("+[%d]*pow(x, %d)", polyorder, polyorder);
 
-  static TF1 * poly =
+  TF1 * poly =
     new TF1("poly", fs.c_str(), hist->GetBinLowEdge(1),
                                 hist->GetBinLowEdge(hist->GetNbinsX()+1));
 
   for(unsigned int i = 0; i <= polyorder; i++)
     poly->SetParameter(i, getpar(mn, i));
-  poly->SavePrimitive(cout);
   poly->SetLineColor(kRed);
   poly->SetNpx(500);
   poly->SetLineWidth(2);
@@ -244,7 +264,7 @@ void bumphunt(TH1D * hist, TH1D * histlive, const bool verbose, const unsigned i
     for(int i = 1; i <= hist->GetNbinsX(); i++){
       if(histlive->GetBinContent(i) == 0) continue;
 
-      const double expected = flat * histlive->GetBinContent(i);
+      const double expected = poly->Eval(hist->GetBinCenter(i)) * histlive->GetBinContent(i);
       const int actual = (int)hist->GetBinContent(i);
 
       const double prob = ROOT::Math::poisson_cdf_c(actual, expected);
@@ -257,7 +277,8 @@ void bumphunt(TH1D * hist, TH1D * histlive, const bool verbose, const unsigned i
       }
     }
 
-    const double expected = flat * histlive->GetBinContent(minprob_bin);
+    const double expected = poly->Eval(hist->GetBinCenter(minprob_bin))
+      * histlive->GetBinContent(minprob_bin);
     const int actual = (int)hist->GetBinContent(minprob_bin);
 
     // This isn't quite right, because it could be more than 1.  Really what
@@ -314,8 +335,8 @@ void novapreliminary()
 
 // polyorder: order of the polynominal to fit for the no-signal hypothesis.
 //            Naively, zero.  For anything with pointing, at least 1.
-void process_rebin(TH1D *hist, TH1D * histlive, const char * title,
-                   const int rebin, const unsigned int polyorder)
+void process_rebin(TH1D *hist, TH1D * histlive,
+                   const int rebin, const popts opts)
 {
   TH1D * rebinned = (TH1D*)hist->Rebin(rebin, "rebinned");
   TH1D * rebinnedlive = histlive == NULL? NULL:
@@ -330,7 +351,7 @@ void process_rebin(TH1D *hist, TH1D * histlive, const char * title,
   static TLatex * ltitle = new TLatex;
   ltitle->SetText(
     0.53 + leftmargin/2 - rightmargin/2 - preliminary * 0.2,
-    0.978 - (!dividebylivetime)*0.02, title);
+    0.978 - (!dividebylivetime)*0.02, opts.name);
   ltitle->SetTextSize(dividebylivetime?textsize*textratiofull:textsize);
   ltitle->SetTextFont(42);
   ltitle->SetTextAlign(22);
@@ -371,22 +392,18 @@ void process_rebin(TH1D *hist, TH1D * histlive, const char * title,
 
     toppad->cd();
     divided->Draw("e");
-    if(toppad->GetUymin() == 0){
-      printf("suppressing zero for %s\n", hist->GetName());
-      divided->GetYaxis()->SetRangeUser(divided->GetMaximum()*1e-4, (divided->GetMaximum()+divided->GetBinError(divided->GetMaximumBin()))*1.1);
-    }
+    if(toppad->GetUymin() == 0) divided->GetYaxis()->ChangeLabel(1, -1, 0);
 
     midpad->cd();
     rebinned->Draw("e");
-    if(midpad->GetUymin() == 0){
-      printf("suppressing zero for %s\n", hist->GetName());
-      rebinned->GetYaxis()->SetRangeUser(rebinned->GetMaximum()*1e-4, (rebinned->GetMaximum()+rebinned->GetBinError(rebinned->GetMaximumBin()))*1.1);
-    }
+    if(midpad->GetUymin() == 0) rebinned->GetYaxis()->ChangeLabel(1, -1, 0);
 
     botpad->cd();
     rebinnedlive->Draw("hist");
 
-    bumphunt(hist, histlive, rebin == 1, polyorder);
+    if(hist->Integral() > 0 && opts.stattest)
+      bumphunt(hist, histlive, rebin == 1,
+               std::min((unsigned int)(hist->Integral()), opts.polyorder));
   }
   else{
     rebinned->GetYaxis()->SetTitleOffset(
@@ -401,12 +418,11 @@ void process_rebin(TH1D *hist, TH1D * histlive, const char * title,
   print2(Form("%s-%ds", hist->GetName(), rebin));
 }
 
-void process(TH1D * hist, TH1D * histlive, const char * const title,
-             const unsigned int polyorder)
+void process(TH1D * hist, TH1D * histlive, const popts opts)
 {
-  printf("\n%s:\n", title);
-  process_rebin(hist, histlive, title,  1, polyorder);
-  process_rebin(hist, histlive, title, 10, polyorder);
+  printf("\n%s:\n", opts.name);
+  process_rebin(hist, histlive,  1, opts);
+  process_rebin(hist, histlive, 10, opts);
 }
 
 void ligopass2(const char * const infilename, const char * outbase_,
@@ -435,31 +451,31 @@ void ligopass2(const char * const infilename, const char * outbase_,
 
   stylecanvas(&USN);
 
-  #define GETORDONT(hname, title, polyorder) \
+  #define DOIT(hname, opts) \
     TH1D * hname = getordont(#hname, ligodir); \
     TH1D * hname##live = getordont(#hname"live", ligodir); \
-    if(hname != NULL && hname##live != NULL) process(hname, hname##live, title, polyorder)
+    if(hname != NULL && hname##live != NULL) process(hname, hname##live, opts)
 
-  GETORDONT(rawtrigger,            "Raw triggers", 0);
-  GETORDONT(rawhits,               "Raw hits", 0);
-  GETORDONT(unslicedbighits,       "Unsliced big hits", 0);
-  GETORDONT(unslice4ddhits,        "Hits in the noise slice", 0);
-  GETORDONT(tracks,                "Slices with tracks", 0);
-  GETORDONT(tracks_point_0,        "Slices with tracks, tight pointing", 1);
-  GETORDONT(tracks_point_1,        "Slices with tracks, loose pointing", 1);
-  GETORDONT(fullycontained_tracks, "Contained tracks", 0);
-  GETORDONT(fullycontained_tracks_point_0, "Contained tracks, tight pointing", 1);
-  GETORDONT(fullycontained_tracks_point_1, "Contained tracks, loose pointing", 1);
-  GETORDONT(contained_slices,      "Contained slices", 0);
-  GETORDONT(halfcontained_tracks,  "Stopping tracks", 0);
-  GETORDONT(halfcontained_tracks_point_0, "Stopping tracks, tight pointing", 1);
-  GETORDONT(halfcontained_tracks_point_1, "Stopping tracks, loose pointing", 1);
-  GETORDONT(unslicedhitpairs,      "Supernova-like events", 0);
-  GETORDONT(upmu_tracks,           "Upward going muons", 0);
-  GETORDONT(upmu_tracks_point_0,   "Upward going muons, tight pointing", 1);
-  GETORDONT(upmu_tracks_point_1,   "Upward going muons, loose pointing", 1);
-  GETORDONT(energy_low_cut,        "High energy triggers", 0);
-  GETORDONT(energy_high_cut,       "Very high energy triggers", 0);
-  GETORDONT(energy_low_cut_pertime,"High energy events", 0);
-  GETORDONT(energy_high_cut_pertime,"Very high energy events", 0);
+  DOIT(rawtrigger,                   popts("Raw triggers", 0, true));
+  DOIT(rawhits,                      popts("Raw hits", 0, false));
+  DOIT(unslicedbighits,              popts("Unsliced big hits", 0, false));
+  DOIT(unslice4ddhits,               popts("Hits in noise slice", 0, true));
+  DOIT(tracks,                       popts("Slices with tracks", 0, true));
+  DOIT(tracks_point_0,               popts("Slices w/ tracks, 1.3#circ", 1, true));
+  DOIT(tracks_point_1,               popts("Slices w/ tracks, 16#circ", 1, true));
+  DOIT(fullycontained_tracks,        popts("Contained tracks", 0, true));
+  DOIT(fullycontained_tracks_point_0,popts("Contained tracks, 1.3#circ", 1, true));
+  DOIT(fullycontained_tracks_point_1,popts("Contained tracks, 16#circ", 1, true));
+  DOIT(contained_slices,             popts("Contained slices", 0, true));
+  DOIT(halfcontained_tracks,         popts("Stopping tracks", 0, true));
+  DOIT(halfcontained_tracks_point_0, popts("Stopping tracks, 1.3#circ", 1, true));
+  DOIT(halfcontained_tracks_point_1, popts("Stopping tracks, 16#circ", 1, true));
+  DOIT(unslicedhitpairs,             popts("Supernova-like events", 0, true));
+  DOIT(upmu_tracks,                  popts("Upward going muons", 0, true));
+  DOIT(upmu_tracks_point_0,          popts("Up-#mu, 1.3#circ", 1, true));
+  DOIT(upmu_tracks_point_1,          popts("Up-#mu, 16#circ", 1, true));
+  DOIT(energy_low_cut,               popts("High energy triggers", 0, true));
+  DOIT(energy_high_cut,              popts("Very high energy triggers", 0, true));
+  DOIT(energy_low_cut_pertime,       popts("High energy events", 0, true));
+  DOIT(energy_high_cut_pertime,      popts("Very high energy events", 0, true));
 }
