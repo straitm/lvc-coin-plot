@@ -78,7 +78,8 @@ void stylehist(TH1D * h, const int can /* 0: full, 1: top, 2: mid, 3: bot */)
   h->SetLineColor(kBlack);
   h->SetMarkerColor(kBlack);
 
-  h->SetLineWidth(2);
+  if(longreadout || h->GetNbinsX() < 300) h->SetLineWidth(2);
+  else                                    h->SetLineWidth(1);
 
   y->CenterTitle();
   x->CenterTitle();
@@ -129,6 +130,9 @@ void stylecanvas(TCanvas * c)
   const double scale = 5.0;
   c->SetCanvasSize(100*scale + (!dividebylivetime)*50*scale, 100*scale);
 
+  gStyle->SetGridColor(kGray);
+  gStyle->SetGridStyle(kSolid);
+
   if(dividebylivetime){
     toppad = new TPad("div", "div", 0, divheight2, 1,          1);
     midpad = new TPad("raw", "raw", 0, divheight1, 1, divheight2);
@@ -148,14 +152,18 @@ void stylecanvas(TCanvas * c)
     botpad->SetTopMargin(0);
     botpad->SetBottomMargin(0.078/divheight1);
 
+    toppad->SetGrid(1, 0);
+    botpad->SetGrid(1, 0);
+    midpad->SetGrid(1, 0);
+
     toppad->Draw();
     botpad->Draw();
     midpad->Draw();
   }
   else{
-   c->SetBottomMargin(0.14);
-   c->SetLeftMargin(0.14);
-   c->SetRightMargin(0.02);
+    c->SetBottomMargin(0.14);
+    c->SetLeftMargin(0.14);
+    c->SetRightMargin(0.02);
   }
 }
 
@@ -178,30 +186,41 @@ TH1D * divide_livetime(TH1D * d, TH1D * live)
   return answer;
 }
 
+void printstart()
+{
+  USN.Print(Form("%s.pdf[", outbase));
+}
+
+void printend()
+{
+  USN.Print(Form("%s.pdf]", outbase));
+}
+
 void print2(const char * const name)
 {
-  USN.Print(Form("%s-%s.pdf", outbase, name));
+  //USN.Print(Form("%s-%s.pdf", outbase, name));
+  USN.Print(Form("%s.pdf", outbase));
 }
 
 
 TH1D * fithist = NULL, * fithistlive = NULL;
 static void fcn(int & np, __attribute__((unused)) double * gin, double & like,
                 double *par, __attribute__((unused)) int flag)
-{ 
+{
   like = 0;
 
-  for(int i = 1; i <= fithist->GetNbinsX(); i++){
+  for(int bin = 1; bin <= fithist->GetNbinsX(); bin++){
     double model = 0;
     for(int p = 0; p < np; p++){
       // Avoid warning about the function value not depending on the parameters
       // when fitting to a constant.
       const double pr = np == 1 ? fabs(par[p]): par[p];
 
-      model += pr * pow(fithist->GetBinCenter(i), p);
+      model += pr * pow(fithist->GetBinCenter(bin), p);
     }
-    model *= fithistlive->GetBinContent(i);
+    model *= fithistlive->GetBinContent(bin);
 
-    const double data = fithist->GetBinContent(i);
+    const double data = fithist->GetBinContent(bin);
 
     if(model > 0){
       like += model - data;
@@ -226,24 +245,61 @@ double geterr(TMinuit & mn, int i) // 0-indexed!
   return err;
 }
 
-void bumphunt(TH1D * hist, TH1D * histlive, const bool verbose, const unsigned int polyorder)
+void stylefunction(TF1 * f)
 {
+  f->SetLineColor(kRed);
+  f->SetNpx(500);
+  f->SetLineWidth(2);
+}
+
+double prob_this_or_more(const int actual, const double expected)
+{
+  if(actual == 0) return 1;
+  // poisson_cdf_c(n, mu) gives the probability that *more* than n events
+  // are seen for a mean of mu.
+  return ROOT::Math::poisson_cdf_c(actual-1, expected);
+}
+
+double lookelsewhere(const double localprob, const int trials)
+{
+  return 1 - pow(1-localprob, trials);
+}
+
+void sigmacheck(const double p)
+{
+  const unsigned int nlev = 2;
+  const double lev[nlev] = { 3, 5 };
+
+  for(unsigned int i = 0; i < nlev; i++)
+    if(p < (1-ROOT::Math::gaussian_cdf(lev[i], 1))*2)
+      printf("*** That's more than %.0f sigma ***\n", lev[i]);
+}
+
+void bumphunt(TH1D * hist, TH1D * histlive, const int rebin,
+              const unsigned int polyorder)
+{
+  const bool verbose = rebin == 1;
   TMinuit mn(polyorder+1);
-  mn.SetPrintLevel(-1);
+  mn.SetPrintLevel(polyorder < 2?-1:0);
   mn.SetFCN(fcn);
   int ierr;
   mn.mnparm(0, "flat", 1, 10, 0, 0, ierr);
   for(unsigned int i = 1; i <= polyorder; i++)
-    mn.mnparm(i, Form("p%d", i), 0, 1, 0, 0, ierr);
+    mn.mnparm(i, Form("p%d", i), 0, 0.001, 0, 0, ierr);
 
   fithist = hist;
   fithistlive = histlive;
   mn.Command("SET STRATEGY 2");
-  mn.Command("MINIMIZE");
+  for(unsigned int p = 0; p <= polyorder; p++) mn.Command(Form("FIX %d", p+1));
+
+  for(unsigned int i = 0; i <= polyorder; i++){
+    mn.Command(Form("REL %d", i+1));
+    mn.Command("MINIMIZE");
+  }
 
   toppad->cd();
 
-  string fs = "[0]";
+  std::string fs = "[0]";
   for(unsigned int i = 1; i <= polyorder; i++)
     fs += Form("+[%d]*pow(x, %d)", polyorder, polyorder);
 
@@ -253,21 +309,38 @@ void bumphunt(TH1D * hist, TH1D * histlive, const bool verbose, const unsigned i
 
   for(unsigned int i = 0; i <= polyorder; i++)
     poly->SetParameter(i, getpar(mn, i));
-  poly->SetLineColor(kRed);
-  poly->SetNpx(500);
-  poly->SetLineWidth(2);
+  stylefunction(poly);
   poly->Draw("same");
+
+  TH1D * fitraw = new TH1D(Form("%sfit", hist->GetName()), "",
+                           hist->GetNbinsX(), hist->GetBinLowEdge(1),
+                           hist->GetBinLowEdge(hist->GetNbinsX()+1));
+  fitraw->SetLineWidth(2);
+  fitraw->SetLineColor(kRed);
+  fitraw->SetMarkerColor(kRed);
+
+  for(int i = 1; i <= fitraw->GetNbinsX(); i += rebin){
+    double sum = 0;
+    for(int j = 0; j < rebin; j++)
+      sum += poly->Eval(fitraw->GetBinCenter(i+j)) * histlive->GetBinContent(i+j);
+    for(int j = 0; j < rebin; j++)
+      fitraw->SetBinContent(i+j, sum);
+  }
+
+  midpad->cd();
+  fitraw->Draw(longreadout?"samehist":"samehist][");
 
   if(verbose){
     double minprob = 1;
     double minprob_bin = 0;
     for(int i = 1; i <= hist->GetNbinsX(); i++){
-      if(histlive->GetBinContent(i) == 0) continue;
+      if(histlive-> GetBinContent(i) == 0) continue;
 
       const double expected = poly->Eval(hist->GetBinCenter(i)) * histlive->GetBinContent(i);
       const int actual = (int)hist->GetBinContent(i);
 
-      const double prob = ROOT::Math::poisson_cdf_c(actual, expected);
+      const double prob = prob_this_or_more(actual, expected);
+
       if(i == hist->GetXaxis()->FindBin(0.5))
         printf("Events in 0-1s: %d, %.3f expected. Prob of this or more: %.2g\n",
                actual, expected, prob);
@@ -281,25 +354,24 @@ void bumphunt(TH1D * hist, TH1D * histlive, const bool verbose, const unsigned i
       * histlive->GetBinContent(minprob_bin);
     const int actual = (int)hist->GetBinContent(minprob_bin);
 
-    // This isn't quite right, because it could be more than 1.  Really what
-    // I mean is not to boost the probability, but to reduce the threshold for
-    // being surprised.  But this is easier to write.
+    const double localprob = prob_this_or_more(actual, expected);
     const double corrprob_almostanywhere =
-      ROOT::Math::poisson_cdf_c(actual, expected) * (hist->GetNbinsX() - 1);
+      lookelsewhere(localprob, hist->GetNbinsX());
 
-    printf("Biggest excess: {%d, %d}s: %d obs, %.1f expected. "
+    printf("Biggest excess: {%d, %d}s: %d obs, %.3f expected. "
            "Prob of this or more somewhere: %.2g\n",
            (int)hist->GetBinLowEdge(minprob_bin),
            (int)hist->GetBinLowEdge(minprob_bin+1),
            actual, expected, corrprob_almostanywhere);
+    sigmacheck(corrprob_almostanywhere);
 
     // We'll consider the first N seconds after the event to be special
-    const int nearlybins = 10;
+    const int nearlybins = 5;
     if(minprob_bin >= hist->GetXaxis()->FindBin(0.5) &&
        minprob_bin <  hist->GetXaxis()->FindBin(0.5)+nearlybins){
 
       const double corrprob_early =
-        ROOT::Math::poisson_cdf_c(actual, expected) * nearlybins;
+        lookelsewhere(prob_this_or_more(actual, expected), nearlybins);
       printf("In fact, this was in 0-%ds. Prob of this: %.2g\n",
              nearlybins, corrprob_early);
     }
@@ -372,7 +444,30 @@ void process_rebin(TH1D *hist, TH1D * histlive,
 
   if(dividebylivetime){
     TH1D * divided = divide_livetime(rebinned, rebinnedlive);
-    if(rebin == 1) divided->GetXaxis()->SetRangeUser(mint, maxt);
+    if(rebin == 1){
+       divided->GetXaxis()->SetRangeUser(mint, maxt);
+
+      double miny = divided->GetMaximum();
+      double maxy = divided->GetMaximum();
+      double extramax = 0, extramin = 0;
+
+      for(int i = 1; i <= divided->GetNbinsX(); i++){
+        const double vmin = divided->GetBinContent(i) - divided->GetBinError(i);
+        const double vmax = divided->GetBinContent(i) + divided->GetBinError(i);
+        const double e = divided->GetBinError(i);
+        if(vmax > maxy){
+           maxy = vmax;
+           extramax = e * 0.5;
+        }
+        if(vmin > 0 && vmin < miny){
+           miny = vmin;
+           extramin = e * 0.5;
+        }
+      }
+
+      if(maxy < 2*miny)
+        divided->GetYaxis()->SetRangeUser(miny-extramin, maxy+extramax);
+    }
 
     stylehist(divided, 1);
     stylehist(rebinned, 2);
@@ -399,10 +494,14 @@ void process_rebin(TH1D *hist, TH1D * histlive,
     if(midpad->GetUymin() == 0) rebinned->GetYaxis()->ChangeLabel(1, -1, 0);
 
     botpad->cd();
-    rebinnedlive->Draw("hist");
+    rebinnedlive->Draw(longreadout?"hist":"hist][");
 
-    if(hist->Integral() > 0 && opts.stattest)
-      bumphunt(hist, histlive, rebin == 1,
+    if(hist->Integral() == 0)
+      printf("No events, so there's no excess\n");
+    else if(!opts.stattest)
+      printf("This distribution is known to be non-Poissonian\n");
+    else
+      bumphunt(hist, histlive, rebin,
                std::min((unsigned int)(hist->Integral()), opts.polyorder));
   }
   else{
@@ -422,7 +521,7 @@ void process(TH1D * hist, TH1D * histlive, const popts opts)
 {
   printf("\n%s:\n", opts.name);
   process_rebin(hist, histlive,  1, opts);
-  process_rebin(hist, histlive, 10, opts);
+  if(!longreadout) process_rebin(hist, histlive, 10, opts);
 }
 
 void ligopass2(const char * const infilename, const char * outbase_,
@@ -450,6 +549,7 @@ void ligopass2(const char * const infilename, const char * outbase_,
   }
 
   stylecanvas(&USN);
+  printstart();
 
   #define DOIT(hname, opts) \
     TH1D * hname = getordont(#hname, ligodir); \
@@ -459,7 +559,8 @@ void ligopass2(const char * const infilename, const char * outbase_,
   DOIT(rawtrigger,                   popts("Raw triggers", 0, true));
   DOIT(rawhits,                      popts("Raw hits", 0, false));
   DOIT(unslicedbighits,              popts("Unsliced big hits", 0, false));
-  DOIT(unslice4ddhits,               popts("Hits in noise slice", 0, true));
+  DOIT(unslice4ddhits,               popts("Hits in noise slice", 0, false));
+  DOIT(unslicedhitpairs,             popts("Supernova-like events", 0, true));
   DOIT(tracks,                       popts("Slices with tracks", 0, true));
   DOIT(tracks_point_0,               popts("Slices w/ tracks, 1.3#circ", 1, true));
   DOIT(tracks_point_1,               popts("Slices w/ tracks, 16#circ", 1, true));
@@ -470,7 +571,6 @@ void ligopass2(const char * const infilename, const char * outbase_,
   DOIT(halfcontained_tracks,         popts("Stopping tracks", 0, true));
   DOIT(halfcontained_tracks_point_0, popts("Stopping tracks, 1.3#circ", 1, true));
   DOIT(halfcontained_tracks_point_1, popts("Stopping tracks, 16#circ", 1, true));
-  DOIT(unslicedhitpairs,             popts("Supernova-like events", 0, true));
   DOIT(upmu_tracks,                  popts("Upward going muons", 0, true));
   DOIT(upmu_tracks_point_0,          popts("Up-#mu, 1.3#circ", 1, true));
   DOIT(upmu_tracks_point_1,          popts("Up-#mu, 16#circ", 1, true));
@@ -478,4 +578,6 @@ void ligopass2(const char * const infilename, const char * outbase_,
   DOIT(energy_high_cut,              popts("Very high energy triggers", 0, true));
   DOIT(energy_low_cut_pertime,       popts("High energy events", 0, true));
   DOIT(energy_high_cut_pertime,      popts("Very high energy events", 0, true));
+
+  printend();
 }
