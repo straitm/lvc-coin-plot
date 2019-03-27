@@ -94,6 +94,8 @@ void stylehist(TH1D * h, const int can /* 0: full, 1: top, 2: mid, 3: bot */)
   x->SetTitleSize(siz);
   y->SetTitleSize(siz);
 
+  y->SetDecimals();
+
   x->SetTickSize(0.03);
   y->SetTickSize(0.015);
 
@@ -268,11 +270,36 @@ double lookelsewhere(const double localprob, const int trials)
 void sigmacheck(const double p)
 {
   const unsigned int nlev = 2;
-  const double lev[nlev] = { 3, 5 };
+  const double lev[nlev] = { 5, 3 };
 
   for(unsigned int i = 0; i < nlev; i++)
-    if(p < (1-ROOT::Math::gaussian_cdf(lev[i], 1))*2)
+    if(p < (1-ROOT::Math::gaussian_cdf(lev[i], 1))*2){
       printf("*** That's more than %.0f sigma ***\n", lev[i]);
+      return;
+    }
+}
+
+void fit(TMinuit & mn, TH1D * hist, TH1D * histlive, const unsigned int polyorder)
+{
+  fithist = hist;
+  fithistlive = histlive;
+
+  mn.Command("SET STRATEGY 2");
+  for(unsigned int p = 0; p <= polyorder; p++) mn.Command(Form("FIX %d", p+1));
+
+  for(unsigned int i = 0; i <= polyorder; i++){
+    // Sloppily try to prevent fitting more than we can chew
+    if(i > 0 && hist->Integral() < 5*i) continue;
+
+    mn.Command(Form("REL %d", i+1));
+    mn.Command("MINIMIZE");
+
+    // Since we use fabs() in the FCN to avoid warnings, we have to fix it here...
+    if((polyorder == 0 || i == 0) && getpar(mn, 0) < 0){
+      mn.Command(Form("SET PAR 1 %f\n", fabs(getpar(mn, 0))));
+      mn.Command("MINIMIZE");
+    }
+  }
 }
 
 void bumphunt(TH1D * hist, TH1D * histlive, const int rebin,
@@ -283,19 +310,11 @@ void bumphunt(TH1D * hist, TH1D * histlive, const int rebin,
   mn.SetPrintLevel(polyorder < 2?-1:0);
   mn.SetFCN(fcn);
   int ierr;
-  mn.mnparm(0, "flat", 1, 10, 0, 0, ierr);
+  mn.mnparm(0, "flat", 1, 1, 0, 0, ierr);
   for(unsigned int i = 1; i <= polyorder; i++)
     mn.mnparm(i, Form("p%d", i), 0, 0.001, 0, 0, ierr);
 
-  fithist = hist;
-  fithistlive = histlive;
-  mn.Command("SET STRATEGY 2");
-  for(unsigned int p = 0; p <= polyorder; p++) mn.Command(Form("FIX %d", p+1));
-
-  for(unsigned int i = 0; i <= polyorder; i++){
-    mn.Command(Form("REL %d", i+1));
-    mn.Command("MINIMIZE");
-  }
+  fit(mn, hist, histlive, polyorder);
 
   toppad->cd();
 
@@ -372,15 +391,16 @@ void bumphunt(TH1D * hist, TH1D * histlive, const int rebin,
 
       const double corrprob_early =
         lookelsewhere(prob_this_or_more(actual, expected), nearlybins);
-      printf("In fact, this was in 0-%ds. Prob of this: %.2g\n",
+      printf("This was in the first %ds. Prob of this: %.2g\n",
              nearlybins, corrprob_early);
+      sigmacheck(corrprob_early);
     }
   }
 }
 
 void randomtime()
 {
-  static TLatex * t = new TLatex(0, 0, "Around 8:30 SNEWS Test");
+  static TLatex * t = new TLatex(0, 0, "8:30 SNEWS Test");
   t->SetTextColorAlpha(kGray, 0.5);
   t->SetTextSize(textsize*textratiofull*2.5);
   t->SetTextFont(42);
@@ -476,10 +496,12 @@ void process_rebin(TH1D *hist, TH1D * histlive,
     divided ->GetYaxis()->SetTitle("Events/s");
     rebinned->GetYaxis()->SetTitle("Raw");
 
-    const double ytitleoff = 1.1 / sqrt(textsize/0.05);
+    const double ytitleoff = 1.2 / sqrt(textsize/0.05);
     divided     ->GetYaxis()->SetTitleOffset(ytitleoff);
     rebinned    ->GetYaxis()->SetTitleOffset(ytitleoff/textratiomid);
-    rebinnedlive->GetYaxis()->SetTitleOffset(ytitleoff/textratiobot);
+
+    // So it aligns to bottom of letters, not bottom of parentheses...
+    rebinnedlive->GetYaxis()->SetTitleOffset(ytitleoff/textratiobot * 0.955);
 
     rebinnedlive->GetYaxis()->SetTitle("Livetime (%)");
     rebinnedlive->Scale(100./rebin);
@@ -487,10 +509,12 @@ void process_rebin(TH1D *hist, TH1D * histlive,
 
     toppad->cd();
     divided->Draw("e");
+    toppad->Update(); // Necessary to get Uymin correctly!
     if(toppad->GetUymin() == 0) divided->GetYaxis()->ChangeLabel(1, -1, 0);
 
     midpad->cd();
     rebinned->Draw("e");
+    midpad->Update(); // Necessary to get Uymin correctly!
     if(midpad->GetUymin() == 0) rebinned->GetYaxis()->ChangeLabel(1, -1, 0);
 
     botpad->cd();
