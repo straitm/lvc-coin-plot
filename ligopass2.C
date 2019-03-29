@@ -375,7 +375,7 @@ void bumphunt(TH1D * hist, TH1D * histlive, const int rebin,
   poly->Draw("same");
 
   if(dividebylivetime){
-    TH1D * fitraw = new TH1D(Form("%sfit", hist->GetName()), "",
+    TH1D * fitraw = new TH1D(Form("%sfit%d", hist->GetName(), rebin), "",
                              hist->GetNbinsX(), hist->GetBinLowEdge(1),
                              hist->GetBinLowEdge(hist->GetNbinsX()+1));
     fitraw->SetLineWidth(2);
