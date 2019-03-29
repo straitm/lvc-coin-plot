@@ -430,7 +430,7 @@ void bumphunt(TH1D * hist, TH1D * histlive, const int rebin,
     sigmacheck(corrprob_almostanywhere);
 
     // We'll consider the first N seconds after the event to be special
-    const int nearlybins = 5;
+    const int nearlybins = 10;
     if(minprob_bin >= hist->GetXaxis()->FindBin(0.5) &&
        minprob_bin <  hist->GetXaxis()->FindBin(0.5)+nearlybins){
 
