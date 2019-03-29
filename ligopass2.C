@@ -32,10 +32,12 @@ struct popts{
 };
 
 const double textsize = 0.0666;
+const double topmargin = 0.09 * textsize/0.07;
 
 bool dividebylivetime = false;
 bool longreadout = false;
 const char * outbase = NULL;
+const char * trigname = NULL;
 
 TCanvas USN;
 TPad * botpad, * midpad, * toppad;
@@ -49,11 +51,30 @@ const double textratiobot = (1-divheight2)/divheight1;
 // Ratio of top pane to whole canvas
 const double textratiofull = (1-divheight2);
 
+  TH1D * lastlive = NULL;
+
 TH1D * getordont(const char * const histname, TDirectory * const ligofile)
 {
   TH1D * h = dynamic_cast<TH1D *>(ligofile->Get(histname));
+
+  const bool livehist =
+    !strcmp(histname + strlen(histname) - (sizeof("live") - 1), "live");
+
+  if(livehist && h != NULL) lastlive = h;
+
   if(h == NULL){
-    fprintf(stderr, "No histogram \"%s\" in your file\n", histname);
+    printf("\nNo histogram \"%s\" in your file\n", histname);
+    if(livehist){
+      if(lastlive != NULL){
+        printf(
+          "Warning: Substituting previous livetime.  As long as different\n"
+          "selections don't somehow have different livetimes, this is fine.\n");
+        return lastlive;
+      }
+      else{
+        printf("***ERROR***: I have to skip this one!\n");
+      }
+    }
     return NULL;
   }
   return h;
@@ -143,8 +164,6 @@ void stylecanvas(TCanvas * c)
     stylepad(midpad);
     stylepad(botpad);
 
-    const double topmargin = 0.09 * textsize/0.07;
-
     toppad->SetTopMargin(topmargin);
     toppad->SetBottomMargin(0);
 
@@ -163,9 +182,12 @@ void stylecanvas(TCanvas * c)
     midpad->Draw();
   }
   else{
-    c->SetBottomMargin(0.14);
-    c->SetLeftMargin(0.14);
+    c->SetBottomMargin(0.143);
+    c->SetLeftMargin(0.125);
     c->SetRightMargin(0.02);
+    c->SetTopMargin(0.08);
+    c->SetTickx(1);
+    c->SetTicky(1);
   }
 }
 
@@ -176,13 +198,14 @@ TH1D * divide_livetime(TH1D * d, TH1D * live)
   for(int i = 1; i <= live->GetNbinsX(); i++){
     const double bc = d->GetBinContent(i);
     const double be = d->GetBinError(i);
-    if(live->GetBinContent(i) == 0){
+    const double livefrac = live->GetBinContent(i);
+    if(livefrac == 0){
       answer->SetBinContent(i, 0);
       answer->SetBinError  (i, 0);
     }
     else{
-      answer->SetBinContent(i, bc/live->GetBinContent(i));
-      answer->SetBinError  (i, be/live->GetBinContent(i));
+      answer->SetBinContent(i, bc/livefrac);
+      answer->SetBinError  (i, be/livefrac);
     }
   }
   return answer;
@@ -289,7 +312,7 @@ void fit(TMinuit & mn, TH1D * hist, TH1D * histlive, const unsigned int polyorde
 
   for(unsigned int i = 0; i <= polyorder; i++){
     // Sloppily try to prevent fitting more than we can chew
-    if(i > 0 && hist->Integral() < 5*i) continue;
+    if(i > 0 && hist->Integral() < 20*i) continue;
 
     mn.Command(Form("REL %d", i+1));
     mn.Command("MINIMIZE");
@@ -302,21 +325,41 @@ void fit(TMinuit & mn, TH1D * hist, TH1D * histlive, const unsigned int polyorde
   }
 }
 
-void bumphunt(TH1D * hist, TH1D * histlive, const int rebin,
-              const unsigned int polyorder)
+TH1D * dummy_histlive(TH1D * hist, const int rebin)
 {
-  const bool verbose = rebin == 1;
-  TMinuit mn(polyorder+1);
+  TH1D * dum = new TH1D("dum", "",
+                        hist->GetNbinsX(),
+                        hist->GetBinLowEdge(1),
+                        hist->GetBinLowEdge(hist->GetNbinsX()+1));
+  for(int i = 1; i <= dum->GetNbinsX(); i++)
+    dum->SetBinContent(i, 1./rebin);
+  return dum;
+}
+
+
+void setup_mn(TMinuit & mn, const unsigned int polyorder)
+{
   mn.SetPrintLevel(polyorder < 2?-1:0);
   mn.SetFCN(fcn);
   int ierr;
   mn.mnparm(0, "flat", 1, 1, 0, 0, ierr);
   for(unsigned int i = 1; i <= polyorder; i++)
     mn.mnparm(i, Form("p%d", i), 0, 0.001, 0, 0, ierr);
+}
+
+
+void bumphunt(TH1D * hist, TH1D * histlive, const int rebin,
+              const unsigned int polyorder)
+{
+  if(histlive == NULL || !dividebylivetime) histlive = dummy_histlive(hist, rebin);
+
+  const bool verbose = rebin == 1;
+  TMinuit mn(polyorder+1);
+  setup_mn(mn, polyorder);
 
   fit(mn, hist, histlive, polyorder);
 
-  toppad->cd();
+  if(dividebylivetime) toppad->cd();
 
   std::string fs = "[0]";
   for(unsigned int i = 1; i <= polyorder; i++)
@@ -331,23 +374,25 @@ void bumphunt(TH1D * hist, TH1D * histlive, const int rebin,
   stylefunction(poly);
   poly->Draw("same");
 
-  TH1D * fitraw = new TH1D(Form("%sfit", hist->GetName()), "",
-                           hist->GetNbinsX(), hist->GetBinLowEdge(1),
-                           hist->GetBinLowEdge(hist->GetNbinsX()+1));
-  fitraw->SetLineWidth(2);
-  fitraw->SetLineColor(kRed);
-  fitraw->SetMarkerColor(kRed);
+  if(dividebylivetime){
+    TH1D * fitraw = new TH1D(Form("%sfit", hist->GetName()), "",
+                             hist->GetNbinsX(), hist->GetBinLowEdge(1),
+                             hist->GetBinLowEdge(hist->GetNbinsX()+1));
+    fitraw->SetLineWidth(2);
+    fitraw->SetLineColor(kRed);
+    fitraw->SetMarkerColor(kRed);
 
-  for(int i = 1; i <= fitraw->GetNbinsX(); i += rebin){
-    double sum = 0;
-    for(int j = 0; j < rebin; j++)
-      sum += poly->Eval(fitraw->GetBinCenter(i+j)) * histlive->GetBinContent(i+j);
-    for(int j = 0; j < rebin; j++)
-      fitraw->SetBinContent(i+j, sum);
+    for(int i = 1; i <= fitraw->GetNbinsX(); i += rebin){
+      double sum = 0;
+      for(int j = 0; j < rebin; j++)
+        sum += poly->Eval(fitraw->GetBinCenter(i+j)) * histlive->GetBinContent(i+j);
+      for(int j = 0; j < rebin; j++)
+        fitraw->SetBinContent(i+j, sum);
+    }
+
+    midpad->cd();
+    fitraw->Draw(longreadout?"samehist":"samehist][");
   }
-
-  midpad->cd();
-  fitraw->Draw(longreadout?"samehist":"samehist][");
 
   if(verbose){
     double minprob = 1;
@@ -415,13 +460,13 @@ void randomtime()
 void novapreliminary()
 {
   static TLatex * t = new TLatex(0, 0, "NOvA Preliminary");
-  t->SetTextColor(kBlue);
+  t->SetTextColorAlpha(kBlue, 0.5);
   t->SetTextSize(dividebylivetime?textsize*textratiofull:textsize);
   t->SetTextFont(42);
   t->SetNDC();
   t->SetTextAlign(32);
-  t->SetX(1-rightmargin-0.005);
-  t->SetY(0.978 - (!dividebylivetime)*0.02);
+  t->SetX(1 - rightmargin - 0.02);
+  t->SetY(1 -  topmargin  + 0.01 - (!dividebylivetime)*0.06);
   t->Draw();
 }
 
@@ -442,11 +487,11 @@ void process_rebin(TH1D *hist, TH1D * histlive,
   // on all the output PDFs.
   static TLatex * ltitle = new TLatex;
   ltitle->SetText(
-    0.53 + leftmargin/2 - rightmargin/2 - preliminary * 0.2,
-    0.978 - (!dividebylivetime)*0.02, opts.name);
+    0.16 + leftmargin/2,
+    0.978 - (!dividebylivetime)*0.02, Form("%s: %s", trigname, opts.name));
   ltitle->SetTextSize(dividebylivetime?textsize*textratiofull:textsize);
   ltitle->SetTextFont(42);
-  ltitle->SetTextAlign(22);
+  ltitle->SetTextAlign(12);
   ltitle->SetNDC();
   ltitle->Draw();
 
@@ -497,8 +542,8 @@ void process_rebin(TH1D *hist, TH1D * histlive,
     rebinned->GetYaxis()->SetTitle("Raw");
 
     const double ytitleoff = 1.2 / sqrt(textsize/0.05);
-    divided     ->GetYaxis()->SetTitleOffset(ytitleoff);
-    rebinned    ->GetYaxis()->SetTitleOffset(ytitleoff/textratiomid);
+    divided ->GetYaxis()->SetTitleOffset(ytitleoff);
+    rebinned->GetYaxis()->SetTitleOffset(ytitleoff/textratiomid);
 
     // So it aligns to bottom of letters, not bottom of parentheses...
     rebinnedlive->GetYaxis()->SetTitleOffset(ytitleoff/textratiobot * 0.955);
@@ -519,41 +564,47 @@ void process_rebin(TH1D *hist, TH1D * histlive,
 
     botpad->cd();
     rebinnedlive->Draw(longreadout?"hist":"hist][");
-
-    if(hist->Integral() == 0)
-      printf("No events, so there's no excess\n");
-    else if(!opts.stattest)
-      printf("This distribution is known to be non-Poissonian\n");
-    else
-      bumphunt(hist, histlive, rebin,
-               std::min((unsigned int)(hist->Integral()), opts.polyorder));
   }
   else{
     rebinned->GetYaxis()->SetTitleOffset(
       (rebinned->GetEntries() < 10? 0.8: 1.1) / sqrt(textsize/0.05));
-    rebinned->GetYaxis()->SetTitle("Events/s");
+    if(rebin == 1)
+      rebinned->GetYaxis()->SetTitle("Events/s");
+    else
+      rebinned->GetYaxis()->SetTitle(Form("Events/%d#kern[-0.5]{ }s", rebin));
+
     rebinned->Draw("e");
     if(preliminary) novapreliminary();
     randomtime();
     ltitle->Draw();
   }
 
+  if(hist->Integral() == 0 && rebin == 1)
+    printf("No events, so there's no excess\n");
+  else if(!opts.stattest && rebin == 1)
+    printf("This distribution is known to be non-Poissonian\n");
+  else
+    bumphunt(hist, histlive, rebin,
+             std::min((unsigned int)(hist->Integral()), opts.polyorder));
+
   print2(Form("%s-%ds", hist->GetName(), rebin));
 }
 
 void process(TH1D * hist, TH1D * histlive, const popts opts)
 {
-  printf("\n%s:\n", opts.name);
+  printf("\n%s: ", opts.name);
   process_rebin(hist, histlive,  1, opts);
   if(!longreadout) process_rebin(hist, histlive, 10, opts);
 }
 
-void ligopass2(const char * const infilename, const char * outbase_,
-               const bool dividebylivetime_, const bool longreadout_)
+void ligopass2(const char * const infilename, const char * trigname_,
+               const char * outbase_, const bool dividebylivetime_,
+               const bool longreadout_)
 {
   outbase = outbase_;
   dividebylivetime = dividebylivetime_;
   longreadout = longreadout_;
+  trigname = trigname_;
 
   // Don't print about making PDFs
   gErrorIgnoreLevel = kWarning;
@@ -577,31 +628,38 @@ void ligopass2(const char * const infilename, const char * outbase_,
 
   #define DOIT(hname, opts) \
     TH1D * hname = getordont(#hname, ligodir); \
-    TH1D * hname##live = getordont(#hname"live", ligodir); \
-    if(hname != NULL && hname##live != NULL) process(hname, hname##live, opts)
+    TH1D * hname##live = hname == NULL? NULL: getordont(#hname"live", ligodir); \
+    if(hname != NULL && (!dividebylivetime || hname##live != NULL)) \
+      process(hname, hname##live, opts)
 
-  DOIT(rawtrigger,                   popts("Raw triggers", 0, true));
-  DOIT(rawhits,                      popts("Raw hits", 0, false));
-  DOIT(unslicedbighits,              popts("Unsliced big hits", 0, false));
-  DOIT(unslice4ddhits,               popts("Hits in noise slice", 0, false));
-  DOIT(unslicedhitpairs,             popts("Supernova-like events", 0, true));
-  DOIT(tracks,                       popts("Slices with tracks", 0, true));
-  DOIT(tracks_point_0,               popts("Slices w/ tracks, 1.3#circ", 1, true));
-  DOIT(tracks_point_1,               popts("Slices w/ tracks, 16#circ", 1, true));
-  DOIT(fullycontained_tracks,        popts("Contained tracks", 0, true));
-  DOIT(fullycontained_tracks_point_0,popts("Contained tracks, 1.3#circ", 1, true));
-  DOIT(fullycontained_tracks_point_1,popts("Contained tracks, 16#circ", 1, true));
-  DOIT(contained_slices,             popts("Contained slices", 0, true));
-  DOIT(halfcontained_tracks,         popts("Stopping tracks", 0, true));
-  DOIT(halfcontained_tracks_point_0, popts("Stopping tracks, 1.3#circ", 1, true));
-  DOIT(halfcontained_tracks_point_1, popts("Stopping tracks, 16#circ", 1, true));
-  DOIT(upmu_tracks,                  popts("Upward going muons", 0, true));
-  DOIT(upmu_tracks_point_0,          popts("Up-#mu, 1.3#circ", 1, true));
-  DOIT(upmu_tracks_point_1,          popts("Up-#mu, 16#circ", 1, true));
-  DOIT(energy_low_cut,               popts("High energy triggers", 0, true));
-  DOIT(energy_high_cut,              popts("Very high energy triggers", 0, true));
-  DOIT(energy_low_cut_pertime,       popts("High energy events", 0, true));
-  DOIT(energy_high_cut_pertime,      popts("Very high energy events", 0, true));
+  DOIT(rawhits,                      popts("Raw hits",                  0, trigname[0] == 'N'));
+  DOIT(unslice4ddhits,               popts("Unsliced hits",             0, trigname[0] == 'N'));
+  DOIT(unslicedbighits,              popts("Unsliced big hits",         0, trigname[0] == 'N'));
+  DOIT(unslicedhitpairs,             popts("Supernova-like events",     0, true));
+
+  // Skip these for the ND long readout, since they are redundant with the 100%
+  // efficienct ND ddactivity1 trigger.
+  if( strcmp(trigname, "ND long readout") ){
+    DOIT(contained_slices,             popts("Contained slices",          0, true));
+    DOIT(tracks,                       popts("Slices with tracks",        0, true));
+    DOIT(tracks_point_0,               popts("Slices w/ tracks, 1.3#circ",1, true));
+    DOIT(tracks_point_1,               popts("Slices w/ tracks, 16#circ", 1, true));
+    DOIT(halfcontained_tracks,         popts("Stopping tracks",           0, true));
+    DOIT(halfcontained_tracks_point_0, popts("Stopping tracks, 1.3#circ", 1, true));
+    DOIT(halfcontained_tracks_point_1, popts("Stopping tracks, 16#circ",  1, true));
+    DOIT(fullycontained_tracks,        popts("Contained tracks",          0, true));
+    DOIT(fullycontained_tracks_point_0,popts("Contained tracks, 1.3#circ",1, true));
+    DOIT(fullycontained_tracks_point_1,popts("Contained tracks, 16#circ", 1, true));
+    DOIT(upmu_tracks,                  popts("Upward going muons",        0, true));
+    DOIT(upmu_tracks_point_0,          popts("Up-#mu, 1.3#circ",          1, true));
+    DOIT(upmu_tracks_point_1,          popts("Up-#mu, 16#circ",           1, true));
+
+    DOIT(rawtrigger,                   popts("Raw triggers",              0, true));
+    DOIT(energy_low_cut,               popts("> 5M ADC total",            0, true));
+    DOIT(energy_high_cut,              popts("> 50M ADC total",           0, true));
+    DOIT(energy_low_cut_pertime,       popts("> 5M ADC per 50#mus",       0, true));
+    DOIT(energy_high_cut_pertime,      popts("> 50M ADC per 50#mus",      0, true));
+  }
 
   printend();
 }
