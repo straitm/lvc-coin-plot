@@ -579,13 +579,16 @@ void process_rebin(TH1D *hist, TH1D * histlive,
     ltitle->Draw();
   }
 
-  if(hist->Integral() == 0 && rebin == 1)
-    printf("No events, so there's no excess\n");
-  else if(!opts.stattest && rebin == 1)
-    printf("This distribution is known to be non-Poissonian\n");
-  else
+  if(hist->Integral() == 0){
+    if(rebin == 1) printf("No events, so there's no excess\n");
+  }
+  else if(!opts.stattest){
+    if(rebin == 1) printf("This distribution is known to be non-Poissonian\n");
+  }
+  else{
     bumphunt(hist, histlive, rebin,
              std::min((unsigned int)(hist->Integral()), opts.polyorder));
+  }
 
   print2(Form("%s-%ds", hist->GetName(), rebin));
 }
@@ -642,17 +645,17 @@ void ligopass2(const char * const infilename, const char * trigname_,
   if( strcmp(trigname, "ND long readout") ){
     DOIT(contained_slices,             popts("Contained slices",          0, true));
     DOIT(tracks,                       popts("Slices with tracks",        0, true));
-    DOIT(tracks_point_0,               popts("Slices w/ tracks, 1.3#circ",1, true));
     DOIT(tracks_point_1,               popts("Slices w/ tracks, 16#circ", 1, true));
+    DOIT(tracks_point_0,               popts("Slices w/ tracks, 1.3#circ",1, true));
     DOIT(halfcontained_tracks,         popts("Stopping tracks",           0, true));
-    DOIT(halfcontained_tracks_point_0, popts("Stopping tracks, 1.3#circ", 1, true));
     DOIT(halfcontained_tracks_point_1, popts("Stopping tracks, 16#circ",  1, true));
+    DOIT(halfcontained_tracks_point_0, popts("Stopping tracks, 1.3#circ", 1, true));
     DOIT(fullycontained_tracks,        popts("Contained tracks",          0, true));
-    DOIT(fullycontained_tracks_point_0,popts("Contained tracks, 1.3#circ",1, true));
     DOIT(fullycontained_tracks_point_1,popts("Contained tracks, 16#circ", 1, true));
+    DOIT(fullycontained_tracks_point_0,popts("Contained tracks, 1.3#circ",1, true));
     DOIT(upmu_tracks,                  popts("Upward going muons",        0, true));
-    DOIT(upmu_tracks_point_0,          popts("Up-#mu, 1.3#circ",          1, true));
     DOIT(upmu_tracks_point_1,          popts("Up-#mu, 16#circ",           1, true));
+    DOIT(upmu_tracks_point_0,          popts("Up-#mu, 1.3#circ",          1, true));
 
     DOIT(rawtrigger,                   popts("Raw triggers",              0, true));
     DOIT(energy_low_cut,               popts("> 5M ADC total",            0, true));
