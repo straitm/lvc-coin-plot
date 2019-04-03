@@ -63,7 +63,9 @@ TH1D * getordont(const char * const histname, TDirectory * const ligofile)
   if(livehist && h != NULL) lastlive = h;
 
   if(h == NULL){
+#ifdef DEBUG
     printf("\nNo histogram \"%s\" in your file\n", histname);
+#endif
     if(livehist){
       if(lastlive != NULL){
         printf(
@@ -209,6 +211,8 @@ void printstart()
 void printend()
 {
   USN.Print(Form("%s.pdf]", outbase));
+
+  printf("************* Finished processing *************\n");
 }
 
 void print2(const char * const name)
@@ -317,6 +321,7 @@ void fit(TMinuit & mn, TH1D * hist, TH1D * histlive, const unsigned int polyorde
 
 TH1D * dummy_histlive(TH1D * hist, const int rebin)
 {
+  if(gROOT->FindObject("dum")) delete gROOT->FindObject("dum");
   TH1D * dum = new TH1D("dum", "",
                         hist->GetNbinsX(),
                         hist->GetBinLowEdge(1),
@@ -651,10 +656,12 @@ void ligopass2(const char * const infilename, const char * trigname_,
     DOIT(upmu_tracks_point_0,          popts("Up-#mu, 1.3#circ",          1, true));
 
     DOIT(rawtrigger,                   popts("Raw triggers",              0, true));
-    DOIT(energy_low_cut,               popts("> 5M ADC total",            0, true));
-    DOIT(energy_high_cut,              popts("> 50M ADC total",           0, true));
-    DOIT(energy_low_cut_pertime,       popts("> 5M ADC per 50#mus",       0, true));
-    DOIT(energy_high_cut_pertime,      popts("> 50M ADC per 50#mus",      0, true));
+    DOIT(energy_low_cut,               popts(">5M ADC total",             0, true));
+    DOIT(energy_high_cut,              popts(">50M ADC total",            0, true));
+    DOIT(energy_vhigh_cut,             popts(">500M ADC total",           0, true));
+    DOIT(energy_low_cut_pertime,       popts(">5M ADC per 50#mus",        0, true));
+    DOIT(energy_high_cut_pertime,      popts(">50M ADC per 50#mus",       0, true));
+    DOIT(energy_vhigh_cut_pertime,     popts(">500M ADC per 50#mus",      0, true));
   }
 
   printend();
