@@ -4,6 +4,7 @@
 #include "TMinuit.h"
 #include "Math/Math.h"
 #include "Math/ProbFuncMathCore.h"
+#include "Math/QuantFuncMathCore.h"
 #include "TH1.h"
 #include "TF1.h"
 #include "TGraph.h"
@@ -14,6 +15,8 @@
 #include "TAxis.h"
 #include "TStyle.h"
 
+//#define DEBUG
+
 struct popts{
   const char * name;
 
@@ -23,11 +26,17 @@ struct popts{
   // Whether to run statistical tests on deviations from background
   bool stattest;
 
-  popts(const char * const name_, const unsigned int polyorder_, const bool stattest_)
+  // Background per second if this histogram is too low-stats to determine
+  // it in one window.  Otherwise zero.
+  double extexp;
+
+  popts(const char * const name_, const unsigned int polyorder_,
+        const bool stattest_, const double extexp_ = 0)
   {
     name = name_;
     polyorder = polyorder_;
     stattest = stattest_;
+    extexp = extexp_;
   }
 };
 
@@ -115,9 +124,9 @@ void stylehist(TH1D * h, const int can /* 0: full, 1: top, 2: mid, 3: bot */)
   x->SetNdivisions(508);
   y->SetNdivisions(can == 0?510: can == 1? 508: 504);
 
-  if(longreadout){
+  if(longreadout || h->Integral() < 100){
     h->SetMarkerStyle(kOpenCircle);
-    h->SetMarkerSize(0.7);
+    h->SetMarkerSize(dividebylivetime?0.7:1.4);
   }
 
   if(h->GetEntries() < 10) y->SetNdivisions(h->GetEntries());
@@ -143,7 +152,7 @@ void stylecanvas(TCanvas * c)
   gStyle->SetOptStat(0);
 
   const double scale = 5.0;
-  c->SetCanvasSize(100*scale + (!dividebylivetime)*50*scale, 100*scale);
+  c->SetCanvasSize((100 + (!dividebylivetime)*50)*scale, 100*scale);
 
   gStyle->SetGridColor(kGray);
   gStyle->SetGridStyle(kSolid);
@@ -264,9 +273,10 @@ double geterr(TMinuit & mn, int i) // 0-indexed!
   return err;
 }
 
-void stylefunction(TF1 * f)
+void stylefunction(TF1 * f, const bool externalexpectation)
 {
   f->SetLineColor(kRed);
+  if(externalexpectation) f->SetLineStyle(9);
   f->SetNpx(500);
   f->SetLineWidth(2);
 }
@@ -292,7 +302,11 @@ void sigmacheck(const double p)
 
   for(unsigned int i = 0; i < nlev; i++)
     if(p < (1-ROOT::Math::gaussian_cdf(lev[i], 1))*2){
-      printf("*** That's more than %.0f sigma ***\n", lev[i]);
+      printf("*******************************************\n"
+             "*******************************************\n"
+             "*******  That's more than %.0f sigma   *******\n"
+             "*******************************************\n"
+             "*******************************************\n", lev[i]);
       return;
     }
 }
@@ -351,8 +365,12 @@ void stylefitraw(TH1D * fitraw)
   fitraw->SetMarkerColor(kRed);
 }
 
+// Look for an excess anywhere in the histogram.  If 'extexp'
+// is positive, use it as the background per second.  Otherwise,
+// fit the histogram using a polnominal of order 'polyorder' and
+// use that as the background.
 void bumphunt(TH1D * hist, TH1D * histlive, const int rebin,
-              const unsigned int polyorder)
+              const double extexp, unsigned int polyorder)
 {
   if(histlive == NULL || !dividebylivetime)
     histlive = dummy_histlive(hist, rebin);
@@ -361,7 +379,12 @@ void bumphunt(TH1D * hist, TH1D * histlive, const int rebin,
   TMinuit mn(polyorder+1);
   setup_mn(mn, polyorder);
 
-  fit(mn, hist, histlive, polyorder);
+  if(extexp > 0){
+    polyorder = 1;
+  }
+  else{
+    fit(mn, hist, histlive, polyorder);
+  }
 
   if(dividebylivetime) toppad->cd();
 
@@ -372,9 +395,14 @@ void bumphunt(TH1D * hist, TH1D * histlive, const int rebin,
   TF1 * poly = new TF1("poly", fs.c_str(), hist->GetBinLowEdge(1),
                        hist->GetBinLowEdge(hist->GetNbinsX()+1));
 
-  for(unsigned int i = 0; i <= polyorder; i++)
-    poly->SetParameter(i, getpar(mn, i));
-  stylefunction(poly);
+  if(extexp > 0){
+    poly->SetParameter(0, extexp);
+  }
+  else{
+    for(unsigned int i = 0; i <= polyorder; i++)
+      poly->SetParameter(i, getpar(mn, i));
+  }
+  stylefunction(poly, extexp > 0);
   poly->Draw("same");
 
   if(dividebylivetime){
@@ -410,8 +438,7 @@ void bumphunt(TH1D * hist, TH1D * histlive, const int rebin,
     const double prob = prob_this_or_more(actual, expected);
 
     if(i == hist->GetXaxis()->FindBin(0.5))
-      printf("Events in 0-1s: %d, %.3f exp. Prob of this or more: %.2g\n",
-             actual, expected, prob);
+      printf("Events 0-1s: %d, %.3f exp. P: %.2g\n", actual, expected, prob);
     if(prob < minprob){
       minprob = prob;
       minprob_bin = i;
@@ -425,12 +452,13 @@ void bumphunt(TH1D * hist, TH1D * histlive, const int rebin,
   const double localprob = prob_this_or_more(actual, expected);
   const double corrprob_almostanywhere=lookelse(localprob, hist->GetNbinsX());
 
-  printf("Biggest excess: {%d, %d}s: %d obs, %.3f exp. "
-         "P of this or more somewhere: %.2g\n",
+  printf("Biggest excess: {%d, %d}s: %d obs, %.3f exp. P somewhere: %.2g\n",
          (int)hist->GetBinLowEdge(minprob_bin),
          (int)hist->GetBinLowEdge(minprob_bin+1),
          actual, expected, corrprob_almostanywhere);
   sigmacheck(corrprob_almostanywhere);
+  printf("Number per second: %.5g\n", hist->Integral()/
+    (hist->GetBinLowEdge(hist->GetNbinsX()+1) - hist->GetBinLowEdge(1)));
 
   // We'll consider the first N seconds after the event to be special
   const int specialbins = 10;
@@ -471,6 +499,75 @@ void novapreliminary()
   t->Draw();
 }
 
+const double np_longreadoutmin = 10.0;
+const double np_notlongreadoutmax = -5.0;
+
+void draw_nonpoisson_f(const double n, const int width, const int color)
+{
+  static int c = 0;
+  TF1 * f = new TF1(Form("npf%d", c++), Form("%f", n),
+    longreadout?np_longreadoutmin:-1000,
+    longreadout?1000:np_notlongreadoutmax);
+  f->SetLineWidth(width);
+  f->SetLineColor(color);
+  f->SetNpx(200);
+  f->Draw("same");
+
+  TF1 * fdot = new TF1(Form("npfdot%d", c++), Form("%f", n),
+    longreadout?-1000:np_notlongreadoutmax,
+    longreadout?np_longreadoutmin:1000);
+  fdot->SetLineStyle(7);
+  fdot->SetLineWidth(width);
+  fdot->SetLineColor(color);
+  fdot->Draw("same");
+}
+
+// Search for excursions from normal behavior for a series that isn't
+// Poissonian, like the total number of hits, which obviously has a lot
+// of correlated activity.
+void bumphunt_nonpoisson(TH1D * h)
+{
+  TH1D side("side", "", 100, h->GetMinimum(), h->GetMaximum()*1.001);
+
+  for(int i = 1; i <= h->GetNbinsX(); i++){
+    if(longreadout && h->GetBinCenter(i) < np_longreadoutmin) continue;
+    if(!longreadout && h->GetBinCenter(i) > np_notlongreadoutmax) continue;
+
+    side.Fill(h->GetBinContent(i));
+  }
+
+  side.Fit("gaus", "l0q");
+  const double mean = side.GetFunction("gaus")->GetParameter(1);
+  const double sigma = side.GetFunction("gaus")->GetParameter(2);
+
+  toppad->cd();
+
+  draw_nonpoisson_f(mean, 3, kRed);
+  draw_nonpoisson_f(mean+sigma, 2, kRed);
+  draw_nonpoisson_f(mean-sigma, 2, kRed);
+  draw_nonpoisson_f(mean+2*sigma, 2, kRed+1);
+  draw_nonpoisson_f(mean-2*sigma, 2, kRed+1);
+
+  for(int i = 1; i <= h->GetNbinsX(); i++){
+    if(longreadout && h->GetBinCenter(i) > np_longreadoutmin) continue;
+    if(!longreadout && h->GetBinCenter(i) < np_notlongreadoutmax) continue;
+
+    const double content = h->GetBinContent(i);
+    const double localsighigh = (content - mean)/sigma;
+    const int trials = longreadout?40:500; // XXX fragile
+    const double prob=lookelse(ROOT::Math::gaussian_cdf_c(localsighigh), trials);
+    const double gsigma = ROOT::Math::gaussian_quantile_c(prob, 1);
+
+    if(content > mean + 3*sigma){
+      printf("{%d, %d} bin is %.1f sigma high local, P=%g (%.1fsigma) global\n",
+         (int)h->GetBinLowEdge(i), (int)h->GetBinLowEdge(i+1),
+         localsighigh, prob, gsigma);
+      sigmacheck(prob);
+    }
+  }
+
+}
+
 // polyorder: order of the polynominal to fit for the no-signal hypothesis.
 //            Naively, zero.  For anything with pointing, at least 1.
 void process_rebin(TH1D *hist, TH1D * histlive,
@@ -508,8 +605,8 @@ void process_rebin(TH1D *hist, TH1D * histlive,
   }
 
 
+  TH1D * divided=dividebylivetime?divide_livetime(rebinned, rebinnedlive):rebinned;
   if(dividebylivetime){
-    TH1D * divided = divide_livetime(rebinned, rebinnedlive);
     if(rebin == 1){
        divided->GetXaxis()->SetRangeUser(mint, maxt);
 
@@ -584,10 +681,10 @@ void process_rebin(TH1D *hist, TH1D * histlive,
     if(rebin == 1) printf("No events, so there's no excess\n");
   }
   else if(!opts.stattest){
-    if(rebin == 1) printf("This distribution is known to be non-Poissonian\n");
+    bumphunt_nonpoisson(divided);
   }
   else{
-    bumphunt(hist, histlive, rebin,
+    bumphunt(hist, histlive, rebin, opts.extexp,
              std::min((unsigned int)(hist->Integral()), opts.polyorder));
   }
 
@@ -647,27 +744,27 @@ void ligopass2(const char * const infilename, const char * trigname_,
   // Skip these for the ND long readout, since they are redundant with the 100%
   // efficienct ND ddactivity1 trigger.
   if( strcmp(trigname, "ND long readout") ){
-    DOIT(contained_slices,             popts("Contained slices",          0, true));
-    DOIT(tracks,                       popts("Slices with tracks",        0, true));
-    DOIT(tracks_point_1,               popts("Slices w/ tracks, 16#circ", 1, true));
-    DOIT(tracks_point_0,               popts("Slices w/ tracks, 1.3#circ",1, true));
-    DOIT(halfcontained_tracks,         popts("Stopping tracks",           0, true));
-    DOIT(halfcontained_tracks_point_1, popts("Stopping tracks, 16#circ",  1, true));
-    DOIT(halfcontained_tracks_point_0, popts("Stopping tracks, 1.3#circ", 1, true));
-    DOIT(fullycontained_tracks,        popts("Contained tracks",          0, true));
-    DOIT(fullycontained_tracks_point_1,popts("Contained tracks, 16#circ", 1, true));
-    DOIT(fullycontained_tracks_point_0,popts("Contained tracks, 1.3#circ",1, true));
-    DOIT(upmu_tracks,                  popts("Upward going muons",        0, true));
-    DOIT(upmu_tracks_point_1,          popts("Up-#mu, 16#circ",           1, true));
-    DOIT(upmu_tracks_point_0,          popts("Up-#mu, 1.3#circ",          1, true));
+    DOIT(contained_slices,            popts("Contained slices",          0, true));
+    DOIT(tracks,                      popts("Slices with tracks",        0, true));
+    DOIT(tracks_point_1,              popts("Slices w/ tracks, 16#circ", 1, true));
+    DOIT(tracks_point_0,              popts("Slices w/ tracks, 1.3#circ",1, true));
+    DOIT(halfcontained_tracks,        popts("Stopping tracks",           0, true));
+    DOIT(halfcontained_tracks_point_1,popts("Stopping tracks, 16#circ",  1, true));
+    DOIT(halfcontained_tracks_point_0,popts("Stopping tracks, 1.3#circ", 1, true));
+    DOIT(fullycontained_tracks,       popts("Contained tracks",          0, true));
+    DOIT(fullycontained_tracks_point_1,popts("Contained tracks, 16#circ",1, true));
+    DOIT(fullycontained_tracks_point_0,popts("Contained tracks, 1.3#circ",1,true));
+    DOIT(upmu_tracks,                 popts("Upward going muons",        0, true));
+    DOIT(upmu_tracks_point_1,         popts("Up-#mu, 16#circ",           1, true));
+    DOIT(upmu_tracks_point_0,         popts("Up-#mu, 1.3#circ",          1, true));
 
-    DOIT(rawtrigger,                   popts("Raw triggers",              0, true));
-    DOIT(energy_low_cut,               popts(">5M ADC total",             0, true));
-    DOIT(energy_high_cut,              popts(">50M ADC total",            0, true));
-    DOIT(energy_vhigh_cut,             popts(">500M ADC total",           0, true));
-    DOIT(energy_low_cut_pertime,       popts(">5M ADC per 50#mus",        0, true));
-    DOIT(energy_high_cut_pertime,      popts(">50M ADC per 50#mus",       0, true));
-    DOIT(energy_vhigh_cut_pertime,     popts(">500M ADC per 50#mus",      0, true));
+    DOIT(rawtrigger,                  popts("Raw triggers",         0, true));
+    DOIT(energy_low_cut,              popts(">5M ADC total",        0, true));
+    DOIT(energy_high_cut,             popts(">50M ADC total",       0, true, 0.0016));
+    DOIT(energy_vhigh_cut,            popts(">500M ADC total",      0, true));
+    DOIT(energy_low_cut_pertime,      popts(">5M ADC per 50#mus",   0, true));
+    DOIT(energy_high_cut_pertime,     popts(">50M ADC per 50#mus",  0, true, 0.0027));
+    DOIT(energy_vhigh_cut_pertime,    popts(">500M ADC per 50#mus", 0, true));
   }
 
   printend();
