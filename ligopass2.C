@@ -279,7 +279,8 @@ double prob_this_or_more(const int actual, const double expected)
   return ROOT::Math::poisson_cdf_c(actual-1, expected);
 }
 
-double lookelsewhere(const double localprob, const int trials)
+// Evaluate look-elsewhere
+double lookelse(const double localprob, const int trials)
 {
   return 1 - pow(1-localprob, trials);
 }
@@ -343,10 +344,18 @@ void setup_mn(TMinuit & mn, const unsigned int polyorder)
 }
 
 
+void stylefitraw(TH1D * fitraw)
+{
+  fitraw->SetLineWidth(2);
+  fitraw->SetLineColor(kRed);
+  fitraw->SetMarkerColor(kRed);
+}
+
 void bumphunt(TH1D * hist, TH1D * histlive, const int rebin,
               const unsigned int polyorder)
 {
-  if(histlive == NULL || !dividebylivetime) histlive = dummy_histlive(hist, rebin);
+  if(histlive == NULL || !dividebylivetime)
+    histlive = dummy_histlive(hist, rebin);
 
   const bool verbose = rebin == 1;
   TMinuit mn(polyorder+1);
@@ -360,9 +369,8 @@ void bumphunt(TH1D * hist, TH1D * histlive, const int rebin,
   for(unsigned int i = 1; i <= polyorder; i++)
     fs += Form("+[%d]*pow(x, %d)", polyorder, polyorder);
 
-  TF1 * poly =
-    new TF1("poly", fs.c_str(), hist->GetBinLowEdge(1),
-                                hist->GetBinLowEdge(hist->GetNbinsX()+1));
+  TF1 * poly = new TF1("poly", fs.c_str(), hist->GetBinLowEdge(1),
+                       hist->GetBinLowEdge(hist->GetNbinsX()+1));
 
   for(unsigned int i = 0; i <= polyorder; i++)
     poly->SetParameter(i, getpar(mn, i));
@@ -373,14 +381,13 @@ void bumphunt(TH1D * hist, TH1D * histlive, const int rebin,
     TH1D * fitraw = new TH1D(Form("%sfit%d", hist->GetName(), rebin), "",
                              hist->GetNbinsX(), hist->GetBinLowEdge(1),
                              hist->GetBinLowEdge(hist->GetNbinsX()+1));
-    fitraw->SetLineWidth(2);
-    fitraw->SetLineColor(kRed);
-    fitraw->SetMarkerColor(kRed);
+    stylefitraw(fitraw);
 
     for(int i = 1; i <= fitraw->GetNbinsX(); i += rebin){
       double sum = 0;
       for(int j = 0; j < rebin; j++)
-        sum += poly->Eval(fitraw->GetBinCenter(i+j)) * histlive->GetBinContent(i+j);
+        sum += poly->Eval(fitraw->GetBinCenter(i+j))
+               * histlive->GetBinContent(i+j);
       for(int j = 0; j < rebin; j++)
         fitraw->SetBinContent(i+j, sum);
     }
@@ -389,52 +396,51 @@ void bumphunt(TH1D * hist, TH1D * histlive, const int rebin,
     fitraw->Draw(longreadout?"samehist":"samehist][");
   }
 
-  if(verbose){
-    double minprob = 1;
-    double minprob_bin = 0;
-    for(int i = 1; i <= hist->GetNbinsX(); i++){
-      if(histlive-> GetBinContent(i) == 0) continue;
+  if(!verbose) return;
 
-      const double expected = poly->Eval(hist->GetBinCenter(i)) * histlive->GetBinContent(i);
-      const int actual = (int)hist->GetBinContent(i);
+  double minprob = 1;
+  double minprob_bin = 0;
+  for(int i = 1; i <= hist->GetNbinsX(); i++){
+    if(histlive-> GetBinContent(i) == 0) continue;
 
-      const double prob = prob_this_or_more(actual, expected);
+    const double expected = poly->Eval(hist->GetBinCenter(i))
+      * histlive->GetBinContent(i);
+    const int actual = (int)hist->GetBinContent(i);
 
-      if(i == hist->GetXaxis()->FindBin(0.5))
-        printf("Events in 0-1s: %d, %.3f expected. Prob of this or more: %.2g\n",
-               actual, expected, prob);
-      if(prob < minprob){
-        minprob = prob;
-        minprob_bin = i;
-      }
+    const double prob = prob_this_or_more(actual, expected);
+
+    if(i == hist->GetXaxis()->FindBin(0.5))
+      printf("Events in 0-1s: %d, %.3f exp. Prob of this or more: %.2g\n",
+             actual, expected, prob);
+    if(prob < minprob){
+      minprob = prob;
+      minprob_bin = i;
     }
+  }
 
-    const double expected = poly->Eval(hist->GetBinCenter(minprob_bin))
-      * histlive->GetBinContent(minprob_bin);
-    const int actual = (int)hist->GetBinContent(minprob_bin);
+  const double expected = poly->Eval(hist->GetBinCenter(minprob_bin))
+    * histlive->GetBinContent(minprob_bin);
+  const int actual = (int)hist->GetBinContent(minprob_bin);
 
-    const double localprob = prob_this_or_more(actual, expected);
-    const double corrprob_almostanywhere =
-      lookelsewhere(localprob, hist->GetNbinsX());
+  const double localprob = prob_this_or_more(actual, expected);
+  const double corrprob_almostanywhere=lookelse(localprob, hist->GetNbinsX());
 
-    printf("Biggest excess: {%d, %d}s: %d obs, %.3f expected. "
-           "Prob of this or more somewhere: %.2g\n",
-           (int)hist->GetBinLowEdge(minprob_bin),
-           (int)hist->GetBinLowEdge(minprob_bin+1),
-           actual, expected, corrprob_almostanywhere);
-    sigmacheck(corrprob_almostanywhere);
+  printf("Biggest excess: {%d, %d}s: %d obs, %.3f exp. "
+         "P of this or more somewhere: %.2g\n",
+         (int)hist->GetBinLowEdge(minprob_bin),
+         (int)hist->GetBinLowEdge(minprob_bin+1),
+         actual, expected, corrprob_almostanywhere);
+  sigmacheck(corrprob_almostanywhere);
 
-    // We'll consider the first N seconds after the event to be special
-    const int nearlybins = 10;
-    if(minprob_bin >= hist->GetXaxis()->FindBin(0.5) &&
-       minprob_bin <  hist->GetXaxis()->FindBin(0.5)+nearlybins){
+  // We'll consider the first N seconds after the event to be special
+  const int specialbins = 10;
+  if(minprob_bin >= hist->GetXaxis()->FindBin(0.5) &&
+     minprob_bin <  hist->GetXaxis()->FindBin(0.5)+specialbins){
 
-      const double corrprob_early =
-        lookelsewhere(prob_this_or_more(actual, expected), nearlybins);
-      printf("This was in the first %ds. Prob of this: %.2g\n",
-             nearlybins, corrprob_early);
-      sigmacheck(corrprob_early);
-    }
+    const double corrprob_early =
+      lookelse(prob_this_or_more(actual, expected), specialbins);
+    printf("This was in first %ds. P: %.2g\n", specialbins, corrprob_early);
+    sigmacheck(corrprob_early);
   }
 }
 
