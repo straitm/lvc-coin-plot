@@ -14,6 +14,7 @@
 #include "TDirectory.h"
 #include "TAxis.h"
 #include "TStyle.h"
+#include "TEllipse.h"
 
 //#define DEBUG
 
@@ -89,6 +90,13 @@ TH1D * getordont(const char * const histname, TDirectory * const ligofile)
     return NULL;
   }
   return h;
+}
+
+void styledrawellipse(TEllipse * a)
+{
+  a->SetFillStyle(0);
+  a->SetLineColor(kRed);
+  a->Draw();
 }
 
 void stylehist(TH1D * h, const int can /* 0: full, 1: top, 2: mid, 3: bot */)
@@ -295,7 +303,9 @@ double lookelse(const double localprob, const int trials)
   return 1 - pow(1-localprob, trials);
 }
 
-void sigmacheck(const double p)
+// Checks whether the probability 'p' is exciting, prints a message if
+// it is, and returns whether it is.
+bool sigmacheck(const double p)
 {
   const unsigned int nlev = 2;
   const double lev[nlev] = { 5, 3 };
@@ -307,8 +317,9 @@ void sigmacheck(const double p)
              "*******  That's more than %.0f sigma   *******\n"
              "*******************************************\n"
              "*******************************************\n", lev[i]);
-      return;
+      return true;
     }
+  return false;
 }
 
 void fit(TMinuit & mn, TH1D * hist, TH1D * histlive, const unsigned int polyorder)
@@ -368,9 +379,10 @@ void stylefitraw(TH1D * fitraw)
 // Look for an excess anywhere in the histogram.  If 'extexp'
 // is positive, use it as the background per second.  Otherwise,
 // fit the histogram using a polnominal of order 'polyorder' and
-// use that as the background.
-void bumphunt(TH1D * hist, TH1D * histlive, const int rebin,
-              const double extexp, unsigned int polyorder)
+// use that as the background.  Return the bin with the biggest
+// excess, or -1 if none has an interesting excess
+int bumphunt(TH1D * hist, TH1D * histlive, const int rebin,
+             const double extexp, unsigned int polyorder)
 {
   if(histlive == NULL || !dividebylivetime)
     histlive = dummy_histlive(hist, rebin);
@@ -424,7 +436,7 @@ void bumphunt(TH1D * hist, TH1D * histlive, const int rebin,
     fitraw->Draw(longreadout?"samehist":"samehist][");
   }
 
-  if(!verbose) return;
+  if(!verbose) return -1;
 
   double minprob = 1;
   double minprob_bin = 0;
@@ -456,7 +468,8 @@ void bumphunt(TH1D * hist, TH1D * histlive, const int rebin,
          (int)hist->GetBinLowEdge(minprob_bin),
          (int)hist->GetBinLowEdge(minprob_bin+1),
          actual, expected, corrprob_almostanywhere);
-  sigmacheck(corrprob_almostanywhere);
+  int ret = -1;
+  if(sigmacheck(corrprob_almostanywhere)) ret = minprob_bin;
   printf("Number per second: %.5g\n", hist->Integral()/
     (hist->GetBinLowEdge(hist->GetNbinsX()+1) - hist->GetBinLowEdge(1)));
 
@@ -470,6 +483,8 @@ void bumphunt(TH1D * hist, TH1D * histlive, const int rebin,
     printf("This was in first %ds. P: %.2g\n", specialbins, corrprob_early);
     sigmacheck(corrprob_early);
   }
+
+  return ret;
 }
 
 void randomtime()
@@ -558,11 +573,12 @@ void bumphunt_nonpoisson(TH1D * h)
     const double prob=lookelse(ROOT::Math::gaussian_cdf_c(localsighigh), trials);
     const double gsigma = ROOT::Math::gaussian_quantile_c(prob, 1);
 
-    if(content > mean + 3*sigma){
+    if(sigmacheck(prob)){
       printf("{%d, %d} bin is %.1f sigma high local, P=%g (%.1fsigma) global\n",
          (int)h->GetBinLowEdge(i), (int)h->GetBinLowEdge(i+1),
          localsighigh, prob, gsigma);
-      sigmacheck(prob);
+      styledrawellipse(new TEllipse(h->GetBinCenter(i), h->GetBinContent(i),
+        longreadout?0.55:10, (toppad->GetUymax()-toppad->GetUymin())/30));
     }
   }
 
@@ -684,8 +700,14 @@ void process_rebin(TH1D *hist, TH1D * histlive,
     bumphunt_nonpoisson(divided);
   }
   else{
-    bumphunt(hist, histlive, rebin, opts.extexp,
+    const int bestbin = bumphunt(hist, histlive, rebin, opts.extexp,
              std::min((unsigned int)(hist->Integral()), opts.polyorder));
+    if(bestbin > 0){
+      toppad->cd();
+      styledrawellipse(new TEllipse(divided->GetBinCenter(bestbin),
+                                    divided->GetBinContent(bestbin),
+        longreadout?0.55:10, (toppad->GetUymax()-toppad->GetUymin())/30));
+    }
   }
 
   print2(Form("%s-%ds", hist->GetName(), rebin));
