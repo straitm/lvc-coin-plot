@@ -26,3 +26,6 @@ neardet-ddactivity1-feb2.pdf: ligopass2.C ligopass2.sh
 
 fardet-ddenergy-feb2.pdf: ligopass2.C ligopass2.sh
 	./ligopass2.sh ../ligotest/1549117741-fardet-ddenergy/ddenergy.ligohists.root       "FD energy trigger" $* dontdivide notlongreadout
+
+fardet-ddenergy-feb3.pdf: ligopass2.C ligopass2.sh
+	./ligopass2.sh /pnfs/nova/scratch/users/mstrait/ligo/ddenergy.ligohists.root       "FD energy trigger" $* dontdivide notlongreadout

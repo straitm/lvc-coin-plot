@@ -2,7 +2,7 @@
 
 if [ $# -ne 5 ]; then
   echo Wrong number of arguments $#
-  echo Syntax: $(basename $0) trigname histfile pdfbase '[divide|dontdivide] [longreadout|notlongreadout]'
+  echo Syntax: $(basename $0) histfile trigname pdfbase '[divide|dontdivide] [longreadout|notlongreadout]'
   exit 1
 fi
 

@@ -80,17 +80,6 @@ TH1D * getordont(const char * const histname, TDirectory * const ligofile)
   return h;
 }
 
-// Count of something that helps me decide whether to put markers on the plot
-double effectivecount(TH1D * h)
-{
-  double c = 0;
-  for(int i = 1; i <= h->GetNbinsX(); i++){
-    if(h->GetBinError(i) == 0) continue;
-    c += h->GetBinContent(i)/h->GetBinError(i);
-  }
-  return c;
-}
-
 void stylehist(TH1D * h, const int can /* 0: full, 1: top, 2: mid, 3: bot */)
 {
   TAxis* y = h->GetYaxis();
@@ -124,8 +113,9 @@ void stylehist(TH1D * h, const int can /* 0: full, 1: top, 2: mid, 3: bot */)
   x->SetNdivisions(508);
   y->SetNdivisions(can == 0?510: can == 1? 508: 504);
 
-  if(effectivecount(h) < h->GetNbinsX()){
+  if(longreadout){
     h->SetMarkerStyle(kOpenCircle);
+    h->SetMarkerSize(0.7);
   }
 
   if(h->GetEntries() < 10) y->SetNdivisions(h->GetEntries());
@@ -597,7 +587,9 @@ void process(TH1D * hist, TH1D * histlive, const popts opts)
 {
   printf("\n%s: ", opts.name);
   process_rebin(hist, histlive,  1, opts);
+#if 0
   if(!longreadout) process_rebin(hist, histlive, 10, opts);
+#endif
 }
 
 void ligopass2(const char * const infilename, const char * trigname_,
@@ -631,14 +623,15 @@ void ligopass2(const char * const infilename, const char * trigname_,
 
   #define DOIT(hname, opts) \
     TH1D * hname = getordont(#hname, ligodir); \
-    TH1D * hname##live = hname == NULL? NULL: getordont(#hname"live", ligodir); \
+    TH1D * hname##live = (hname == NULL || !dividebylivetime)? NULL\
+                          : getordont(#hname"live", ligodir); \
     if(hname != NULL && (!dividebylivetime || hname##live != NULL)) \
       process(hname, hname##live, opts)
 
-  DOIT(rawhits,                      popts("Raw hits",                  0, trigname[0] == 'N'));
-  DOIT(unslice4ddhits,               popts("Unsliced hits",             0, trigname[0] == 'N'));
-  DOIT(unslicedbighits,              popts("Unsliced big hits",         0, trigname[0] == 'N'));
-  DOIT(unslicedhitpairs,             popts("Supernova-like events",     0, true));
+  DOIT(rawhits,          popts("Raw hits",              0, trigname[0] == 'N'));
+  DOIT(unslice4ddhits,   popts("Unsliced hits",         0, trigname[0] == 'N'));
+  DOIT(unslicedbighits,  popts("Unsliced big hits",     0, trigname[0] == 'N'));
+  DOIT(unslicedhitpairs, popts("Supernova-like events", 0, true));
 
   // Skip these for the ND long readout, since they are redundant with the 100%
   // efficienct ND ddactivity1 trigger.
