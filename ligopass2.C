@@ -721,10 +721,11 @@ void process_rebin(TH1D *hist, TH1D * histlive,
     const int bestbin = bumphunt(hist, histlive, rebin, opts.extexp,
              std::min((unsigned int)(hist->Integral()), opts.polyorder));
     if(bestbin > 0){
-      toppad->cd();
+      TPad * p = dividebylivetime? toppad: &USN;
+      p->cd();
       styledrawellipse(new TEllipse(divided->GetBinCenter(bestbin),
                                     divided->GetBinContent(bestbin),
-        longreadout?0.55:10, (toppad->GetUymax()-toppad->GetUymin())/30));
+        longreadout?0.55:10, (p->GetUymax() - p->GetUymin())/30));
     }
   }
 
