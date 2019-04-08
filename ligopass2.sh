@@ -28,5 +28,5 @@ else
   exit 1
 fi
 
-root -n -l -b -q ligopass2.C+'("'"$histfile"'","'"$trigname"'","'"$pdfbase"'",'$livetimediv', '$longreadout')' \
+root -n -l -b -q $(dirname $0)/ligopass2.C+'("'"$histfile"'","'"$trigname"'","'"$pdfbase"'",'$livetimediv', '$longreadout')' \
  | tee $pdfbase.log

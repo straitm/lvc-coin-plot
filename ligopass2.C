@@ -18,6 +18,9 @@
 
 //#define DEBUG
 
+// The total number of histograms searched for 
+const unsigned int NHIST = 52;
+
 struct popts{
   const char * name;
 
@@ -59,9 +62,9 @@ const double textratiomid = (1-divheight2)/(divheight2 - divheight1);
 // Ratio of top pane to bottom pane
 const double textratiobot = (1-divheight2)/divheight1;
 // Ratio of top pane to whole canvas
-const double textratiofull = (1-divheight2);
+const double textratiofull = 1-divheight2;
 
-  TH1D * lastlive = NULL;
+TH1D * lastlive = NULL;
 
 TH1D * getordont(const char * const histname, TDirectory * const ligofile)
 {
@@ -332,7 +335,7 @@ void fit(TMinuit & mn, TH1D * hist, TH1D * histlive, const unsigned int polyorde
 
   for(unsigned int i = 0; i <= polyorder; i++){
     // Sloppily try to prevent fitting more than we can chew
-    if(i > 0 && hist->Integral() < 20*i) continue;
+    if(i > 0 && hist->Integral() < 50*i) continue;
 
     mn.Command(Form("REL %d", i+1));
     mn.Command("MINIMIZE");
@@ -462,26 +465,28 @@ int bumphunt(TH1D * hist, TH1D * histlive, const int rebin,
   const int actual = (int)hist->GetBinContent(minprob_bin);
 
   const double localprob = prob_this_or_more(actual, expected);
-  const double corrprob_almostanywhere=lookelse(localprob, hist->GetNbinsX());
+  const double histprob = lookelse(localprob, hist->GetNbinsX());
+  const double globprob = lookelse(localprob, NHIST*hist->GetNbinsX());
 
-  printf("Biggest excess: {%d, %d}s: %d obs, %.3f exp. P somewhere: %.2g\n",
+  printf("Highest: {%d, %d}s: %d, %.3f exp. P hist: %.2g (%.2g global)\n",
          (int)hist->GetBinLowEdge(minprob_bin),
          (int)hist->GetBinLowEdge(minprob_bin+1),
-         actual, expected, corrprob_almostanywhere);
+         actual, expected, histprob, globprob);
   int ret = -1;
-  if(sigmacheck(corrprob_almostanywhere)) ret = minprob_bin;
+  if(sigmacheck(globprob)) ret = minprob_bin;
   printf("Number per second: %.5g\n", hist->Integral()/
     (hist->GetBinLowEdge(hist->GetNbinsX()+1) - hist->GetBinLowEdge(1)));
 
   // We'll consider the first N seconds after the event to be special
   const int specialbins = 10;
-  if(minprob_bin >= hist->GetXaxis()->FindBin(0.5) &&
-     minprob_bin <  hist->GetXaxis()->FindBin(0.5)+specialbins){
-
-    const double corrprob_early =
-      lookelse(prob_this_or_more(actual, expected), specialbins);
-    printf("This was in first %ds. P: %.2g\n", specialbins, corrprob_early);
-    sigmacheck(corrprob_early);
+  const int specialbin1 = hist->GetXaxis()->FindBin(0.5);
+  if(minprob_bin >= specialbin1 && minprob_bin < specialbin1+specialbins){
+    const double slocalprob = prob_this_or_more(actual, expected);
+    const double shistprob = lookelse(localprob, specialbins);
+    const double sglobprob     = lookelse(localprob, NHIST*specialbins);
+    printf("This was in first %ds. P: %.2g (%.2g global)\n",
+           specialbins, shistprob, sglobprob);
+    sigmacheck(sglobprob);
   }
 
   return ret;
@@ -551,6 +556,11 @@ void bumphunt_nonpoisson(TH1D * h)
     side.Fill(h->GetBinContent(i));
   }
 
+  if(side.Integral() == 0){
+    printf("No data in baseline region\n");
+    return;
+  }
+
   side.Fit("gaus", "l0q");
   const double mean = side.GetFunction("gaus")->GetParameter(1);
   const double sigma = side.GetFunction("gaus")->GetParameter(2);
@@ -567,16 +577,24 @@ void bumphunt_nonpoisson(TH1D * h)
     if(longreadout && h->GetBinCenter(i) > np_longreadoutmin) continue;
     if(!longreadout && h->GetBinCenter(i) < np_notlongreadoutmax) continue;
 
-    const double content = h->GetBinContent(i);
-    const double localsighigh = (content - mean)/sigma;
-    const int trials = longreadout?40:500; // XXX fragile
-    const double prob=lookelse(ROOT::Math::gaussian_cdf_c(localsighigh), trials);
-    const double gsigma = ROOT::Math::gaussian_quantile_c(prob, 1);
+    // XXX janky, but not as janky as just taking the central value.
+    // In most cases, the error is quite small, but this protects against
+    // bins with low livetime.
+    const double content = h->GetBinContent(i) - h->GetBinError(i);
 
-    if(sigmacheck(prob)){
-      printf("{%d, %d} bin is %.1f sigma high local, P=%g (%.1fsigma) global\n",
+    const double localsigma = (content - mean)/sigma;
+    const int trials = longreadout?40:500; // XXX fragile
+    const double localprob = ROOT::Math::gaussian_cdf_c(localsigma);
+    const double histprob = lookelse(localprob, trials);
+    const double globprob = lookelse(localprob, NHIST*trials);
+
+    const double histsigma = ROOT::Math::gaussian_quantile_c(histprob, 1);
+    const double globsigma = ROOT::Math::gaussian_quantile_c(globprob, 1);
+
+    if(sigmacheck(globprob)){
+      printf("{%d, %d} %.1fsigma local, %.1fsigma in hist, %.1fsigma global\n",
          (int)h->GetBinLowEdge(i), (int)h->GetBinLowEdge(i+1),
-         localsighigh, prob, gsigma);
+         localsigma, histsigma, globsigma);
       styledrawellipse(new TEllipse(h->GetBinCenter(i), h->GetBinContent(i),
         longreadout?0.55:10, (toppad->GetUymax()-toppad->GetUymin())/30));
     }
