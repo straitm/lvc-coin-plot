@@ -722,6 +722,17 @@ void process(TH1D * hist, TH1D * histlive, const popts opts)
 #endif
 }
 
+TDirectory * ligodir = NULL;
+
+void DOIT(const char * const hname, const popts & opts)
+{
+  TH1D * h = getordont(hname, ligodir);
+  TH1D * hlive = (h == NULL || !dividebylivetime)? NULL
+                        : getordont(Form("%slive", hname), ligodir);
+  if(h != NULL && (!dividebylivetime || hlive != NULL))
+    process(h, hlive, opts);
+}
+
 void ligopass2(const char * const infilename, const char * trigname_,
                const char * outbase_, const bool dividebylivetime_,
                const bool longreadout_)
@@ -740,7 +751,7 @@ void ligopass2(const char * const infilename, const char * trigname_,
     exit(1);
   }
 
-  TDirectory * ligodir = dynamic_cast<TDirectory*>(ligofile->Get("ligoanalysis"));
+  ligodir = dynamic_cast<TDirectory*>(ligofile->Get("ligoanalysis"));
   if(ligodir == NULL) ligodir = dynamic_cast<TDirectory*>(ligofile->Get("ligo"));
 
   if(ligodir == NULL){
@@ -751,42 +762,36 @@ void ligopass2(const char * const infilename, const char * trigname_,
   stylecanvas(&USN);
   printstart();
 
-  #define DOIT(hname, opts) \
-    TH1D * hname = getordont(#hname, ligodir); \
-    TH1D * hname##live = (hname == NULL || !dividebylivetime)? NULL\
-                          : getordont(#hname"live", ligodir); \
-    if(hname != NULL && (!dividebylivetime || hname##live != NULL)) \
-      process(hname, hname##live, opts)
+  DOIT("supernovalike",   popts("Supernova-like events", 0, true));
+  DOIT("unslicedbighits", popts("Unsliced big hits",     0, trigname[0] == 'N'));
+  DOIT("unslicedhits",    popts("Unsliced hits",         0, trigname[0] == 'N'));
 
-  DOIT(rawhits,          popts("Raw hits",              0, trigname[0] == 'N'));
-  DOIT(unslice4ddhits,   popts("Unsliced hits",         0, trigname[0] == 'N'));
-  DOIT(unslicedbighits,  popts("Unsliced big hits",     0, trigname[0] == 'N'));
-  DOIT(unslicedhitpairs, popts("Supernova-like events", 0, true));
 
   // Skip these for the ND long readout, since they are redundant with the 100%
   // efficienct ND ddactivity1 trigger.
   if( strcmp(trigname, "ND long readout") ){
-    DOIT(contained_slices,            popts("Contained slices",          0, true));
-    DOIT(tracks,                      popts("Slices with tracks",        0, true));
-    DOIT(tracks_point_1,              popts("Slices w/ tracks, 16#circ", 1, true));
-    DOIT(tracks_point_0,              popts("Slices w/ tracks, 1.3#circ",1, true));
-    DOIT(halfcontained_tracks,        popts("Stopping tracks",           0, true));
-    DOIT(halfcontained_tracks_point_1,popts("Stopping tracks, 16#circ",  1, true));
-    DOIT(halfcontained_tracks_point_0,popts("Stopping tracks, 1.3#circ", 1, true));
-    DOIT(fullycontained_tracks,       popts("Contained tracks",          0, true));
-    DOIT(fullycontained_tracks_point_1,popts("Contained tracks, 16#circ",1, true));
-    DOIT(fullycontained_tracks_point_0,popts("Contained tracks, 1.3#circ",1,true));
-    DOIT(upmu_tracks,                 popts("Upward going muons",        0, true));
-    DOIT(upmu_tracks_point_1,         popts("Up-#mu, 16#circ",           1, true));
-    DOIT(upmu_tracks_point_0,         popts("Up-#mu, 1.3#circ",          1, true));
+    // XXX why does it crash here on neardet-ddactivity1?
+    DOIT("contained_slices",             popts("Contained slices",          0, true));
+    DOIT("tracks",                       popts("Slices with tracks",        0, true));
+    DOIT("tracks_point_1",               popts("Slices w/ tracks, 16#circ", 1, true));
+    DOIT("tracks_point_0",               popts("Slices w/ tracks, 1.3#circ",1, true));
+    DOIT("halfcontained_tracks",         popts("Stopping tracks",           0, true));
+    DOIT("halfcontained_tracks_point_1", popts("Stopping tracks, 16#circ",  1, true));
+    DOIT("halfcontained_tracks_point_0", popts("Stopping tracks, 1.3#circ", 1, true));
+    DOIT("fullycontained_tracks",        popts("Contained tracks",          0, true));
+    DOIT("fullycontained_tracks_point_1",popts("Contained tracks, 16#circ",1, true));
+    DOIT("fullycontained_tracks_point_0",popts("Contained tracks, 1.3#circ",1,true));
+    DOIT("upmu_tracks",                  popts("Upward going muons",        0, true));
+    DOIT("upmu_tracks_point_1",          popts("Up-#mu, 16#circ",           1, true));
+    DOIT("upmu_tracks_point_0",          popts("Up-#mu, 1.3#circ",          1, true));
 
-    DOIT(rawtrigger,                  popts("Raw triggers",         0, true));
-    DOIT(energy_low_cut,              popts(">5M ADC total",        0, true));
-    DOIT(energy_high_cut,             popts(">50M ADC total",       0, true, 0.0016));
-    DOIT(energy_vhigh_cut,            popts(">500M ADC total",      0, true));
-    DOIT(energy_low_cut_pertime,      popts(">5M ADC per 50#mus",   0, true));
-    DOIT(energy_high_cut_pertime,     popts(">50M ADC per 50#mus",  0, true, 0.0027));
-    DOIT(energy_vhigh_cut_pertime,    popts(">500M ADC per 50#mus", 0, true));
+    DOIT("rawtrigger",                   popts("Raw triggers",         0, true));
+    DOIT("energy_low_cut",               popts(">5M ADC total",        0, true));
+    DOIT("energy_high_cut",              popts(">50M ADC total",       0, true, 0.0016));
+    DOIT("energy_vhigh_cut",             popts(">500M ADC total",      0, true));
+    DOIT("energy_low_cut_pertime",       popts(">5M ADC per 50#mus",   0, true));
+    DOIT("energy_high_cut_pertime",      popts(">50M ADC per 50#mus",  0, true, 0.0027));
+    DOIT("energy_vhigh_cut_pertime",     popts(">500M ADC per 50#mus", 0, true));
   }
 
   printend();
