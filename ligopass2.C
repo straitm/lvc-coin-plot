@@ -66,9 +66,9 @@ const double textratiofull = 1-divheight2;
 
 TH1D * lastlive = NULL;
 
-TH1D * getordont(const char * const histname, TDirectory * const ligofile)
+TH1D * getordont(const char * const histname, TDirectory * const ligodir)
 {
-  TH1D * h = dynamic_cast<TH1D *>(ligofile->Get(histname));
+  TH1D * h = dynamic_cast<TH1D *>(ligodir->Get(histname));
 
   const bool livehist =
     !strcmp(histname + strlen(histname) - (sizeof("live") - 1), "live");
@@ -562,6 +562,10 @@ void bumphunt_nonpoisson(TH1D * h)
   }
 
   side.Fit("gaus", "l0q");
+  if(side.GetFunction("gaus") == NULL){
+    fprintf(stderr, "Fit failed in bumphunt_nonpoisson on %s\n", h->GetName());
+    return;
+  }
   const double mean = side.GetFunction("gaus")->GetParameter(1);
   const double sigma = side.GetFunction("gaus")->GetParameter(2);
 
@@ -746,10 +750,12 @@ TDirectory * ligodir = NULL;
 void DOIT(const char * const hname, const popts & opts)
 {
   TH1D * h = getordont(hname, ligodir);
-  TH1D * hlive = (h == NULL || !dividebylivetime)? NULL
-                        : getordont(Form("%slive", hname), ligodir);
-  if(h != NULL && (!dividebylivetime || hlive != NULL))
-    process(h, hlive, opts);
+  if(h == NULL) return;
+
+  TH1D * hlive = !dividebylivetime ? NULL
+    : getordont(Form("%slive", hname), ligodir);
+
+  if(!dividebylivetime || hlive != NULL) process(h, hlive, opts);
 }
 
 void ligopass2(const char * const infilename, const char * trigname_,
