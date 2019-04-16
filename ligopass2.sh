@@ -1,30 +1,38 @@
 #!/bin/bash
 
-if [ $# -ne 5 ]; then
+if [ $# -ne 1 ]; then
   echo Wrong number of arguments $#
-  echo Syntax: $(basename $0) histfile trigname pdfbase '[divide|dontdivide] [longreadout|notlongreadout]'
+  echo Syntax: $(basename $0) histfile
+  echo Histfile has to have a standard trigger name in it
   exit 1
 fi
 
 histfile=$1
-trigname=$2
-pdfbase=$3
 
-if [ "$4" == divide ]; then
+pdfbase=$(basename $f .hadded.root)
+
+if echo $histfile | grep fardet-t02; then
+  trigname="FD 10Hz trigger"
   livetimediv=1
-elif [ "$4" == dontdivide ]; then
-  livetimediv=0
-else
-  echo Give \"divide\" or \"dontdivide\" for third argument
-  exit 1
-fi
-
-if [ "$5" == longreadout ]; then
-  longreadout=1
-elif [ "$5" == notlongreadout ]; then
   longreadout=0
+elif echo $histfile | grep neardet-ddactivity1; then
+  trigname="ND energy"
+  livetimediv=0
+  longreadout=0
+elif echo $histfile | grep fardet-ddenergy; then
+  trigname="FD energy"
+  livetimediv=0
+  longreadout=0
+elif echo $histfile | grep neardet-ddsnews; then
+  trigname="ND long readout"
+  livetimediv=1
+  longreadout=1
+elif echo $histfile | grep fardet-ddsnews; then
+  trigname="FD long readout"
+  livetimediv=1
+  longreadout=1
 else
-  echo Give \"longreadout\" or \"notlongreadout\" for fourth argument
+  echo Could not figure out what kind of data $pdfbase is
   exit 1
 fi
 

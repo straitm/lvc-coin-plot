@@ -44,7 +44,7 @@ struct popts{
   }
 };
 
-const double textsize = 0.0666;
+const double textsize = 0.07;
 const double topmargin = 0.09 * textsize/0.07;
 
 bool dividebylivetime = false;
@@ -232,12 +232,12 @@ void printend()
 {
   USN.Print(Form("%s.pdf]", outbase));
 
-  printf("************* Finished processing *************\n");
+  printf("------------- Finished processing -------------\n");
 }
 
 void print2(const char * const name)
 {
-  //USN.Print(Form("%s-%s.pdf", outbase, name));
+  USN.Print(Form("%s-%s.pdf", outbase, name));
   USN.Print(Form("%s.pdf", outbase));
 }
 
@@ -286,10 +286,10 @@ double geterr(TMinuit & mn, int i) // 0-indexed!
 
 void stylefunction(TF1 * f, const bool externalexpectation)
 {
-  f->SetLineColor(kRed);
-  if(externalexpectation) f->SetLineStyle(9);
+  f->SetLineColor(externalexpectation?kBlue:kRed);
+  f->SetLineStyle(externalexpectation?9:1);
+  f->SetLineWidth(externalexpectation?4:2);
   f->SetNpx(500);
-  f->SetLineWidth(2);
 }
 
 double prob_this_or_more(const int actual, const double expected)
@@ -475,7 +475,7 @@ int bumphunt(TH1D * hist, TH1D * histlive, const int rebin,
   int ret = -1;
   if(sigmacheck(globprob)) ret = minprob_bin;
   printf("Number per second: %.5g\n", hist->Integral()/
-    (hist->GetBinLowEdge(hist->GetNbinsX()+1) - hist->GetBinLowEdge(1)));
+    histlive->Integral()/histlive->GetBinWidth(1));
 
   // We'll consider the first N seconds after the event to be special
   const int specialbins = 10;
@@ -684,7 +684,7 @@ void process_rebin(TH1D *hist, TH1D * histlive,
     // So it aligns to bottom of letters, not bottom of parentheses...
     rebinnedlive->GetYaxis()->SetTitleOffset(ytitleoff/textratiobot * 0.955);
 
-    rebinnedlive->GetYaxis()->SetTitle("Livetime (%)");
+    rebinnedlive->GetYaxis()->SetTitle("Live (%)");
     rebinnedlive->Scale(100./rebin);
     rebinnedlive->GetYaxis()->SetRangeUser(0, rebinnedlive->GetMaximum()*1.2);
 
@@ -713,6 +713,12 @@ void process_rebin(TH1D *hist, TH1D * histlive,
     if(preliminary) novapreliminary();
     randomtime();
     ltitle->Draw();
+
+    if(opts.extexp > 0){
+      rebinned->GetYaxis()->SetTitleOffset(rebinned->GetYaxis()->GetTitleOffset()*1.4);
+      rebinned->GetYaxis()->SetRangeUser(opts.extexp/2, rebinned->GetMaximum()*8);
+      USN.SetLogy();
+    }
   }
 
   if(hist->Integral() == 0){
@@ -724,8 +730,8 @@ void process_rebin(TH1D *hist, TH1D * histlive,
   else{
     const int bestbin = bumphunt(hist, histlive, rebin, opts.extexp,
              std::min((unsigned int)(hist->Integral()), opts.polyorder));
+    TPad * p = dividebylivetime? toppad: &USN;
     if(bestbin > 0){
-      TPad * p = dividebylivetime? toppad: &USN;
       p->cd();
       styledrawellipse(new TEllipse(divided->GetBinCenter(bestbin),
                                     divided->GetBinContent(bestbin),
@@ -740,7 +746,7 @@ void process(TH1D * hist, TH1D * histlive, const popts opts)
 {
   printf("\n%s: ", opts.name);
   process_rebin(hist, histlive,  1, opts);
-#if 0
+#if 1
   if(!longreadout) process_rebin(hist, histlive, 10, opts);
 #endif
 }
@@ -787,36 +793,48 @@ void ligopass2(const char * const infilename, const char * trigname_,
   stylecanvas(&USN);
   printstart();
 
+  // XXX Needs a manual background for ND
   DOIT("supernovalike",   popts("Supernova-like events", 0, true));
+
   DOIT("unslicedbighits", popts("Unsliced big hits",     0, trigname[0] == 'N'));
   DOIT("unslicedhits",    popts("Unsliced hits",         0, trigname[0] == 'N'));
 
 
   // Skip these for the ND long readout, since they are redundant with the 100%
-  // efficienct ND ddactivity1 trigger.
+  // efficient ND ddactivity1 trigger.
   if( strcmp(trigname, "ND long readout") ){
-    // XXX why does it crash here on neardet-ddactivity1?
+    // XXX ND needs its background measured externally
     DOIT("contained_slices",             popts("Contained slices",          0, true));
+
     DOIT("tracks",                       popts("Slices with tracks",        0, true));
     DOIT("tracks_point_1",               popts("Slices w/ tracks, 16#circ", 1, true));
     DOIT("tracks_point_0",               popts("Slices w/ tracks, 1.3#circ",1, true));
     DOIT("halfcontained_tracks",         popts("Stopping tracks",           0, true));
     DOIT("halfcontained_tracks_point_1", popts("Stopping tracks, 16#circ",  1, true));
+
+    // XXX Maybe needs a manual *time-varying* background for FD t02, definitely for ND
     DOIT("halfcontained_tracks_point_0", popts("Stopping tracks, 1.3#circ", 1, true));
+
+    // XXX All three (nine) of these need their backgrounds measured externally
     DOIT("fullycontained_tracks",        popts("Contained tracks",          0, true));
-    DOIT("fullycontained_tracks_point_1",popts("Contained tracks, 16#circ",1, true));
-    DOIT("fullycontained_tracks_point_0",popts("Contained tracks, 1.3#circ",1,true));
+    DOIT("fullycontained_tracks_point_1",popts("Contained tracks, 16#circ", 1, true));
+    DOIT("fullycontained_tracks_point_0",popts("Contained tracks, 1.3#circ",1, true));
+
+    // XXX Except for FD inclusive, all these need their backgrounds measured externally
     DOIT("upmu_tracks",                  popts("Upward going muons",        0, true));
     DOIT("upmu_tracks_point_1",          popts("Up-#mu, 16#circ",           1, true));
     DOIT("upmu_tracks_point_0",          popts("Up-#mu, 1.3#circ",          1, true));
 
     DOIT("rawtrigger",                   popts("Raw triggers",         0, true));
     DOIT("energy_low_cut",               popts(">5M ADC total",        0, true));
+    DOIT("energy_low_cut_pertime",       popts(">2.5M ADC per 50#mus", 0, true));
+
     DOIT("energy_high_cut",              popts(">50M ADC total",       0, true, 0.0016));
-    DOIT("energy_vhigh_cut",             popts(">500M ADC total",      0, true));
-    DOIT("energy_low_cut_pertime",       popts(">5M ADC per 50#mus",   0, true));
-    DOIT("energy_high_cut_pertime",      popts(">50M ADC per 50#mus",  0, true, 0.0027));
-    DOIT("energy_vhigh_cut_pertime",     popts(">500M ADC per 50#mus", 0, true));
+    DOIT("energy_high_cut_pertime",      popts(">25M ADC per 50#mus",  0, true, 0.0027));
+
+    // XXX Need higher statistics for background
+    DOIT("energy_vhigh_cut",             popts(">500M ADC total",      0, true, 4e-5));
+    DOIT("energy_vhigh_cut_pertime",     popts(">250M ADC per 50#mus", 0, true, 4e-5));
   }
 
   printend();
