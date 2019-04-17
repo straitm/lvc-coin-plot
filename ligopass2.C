@@ -18,8 +18,18 @@
 
 //#define DEBUG
 
-// The total number of histograms searched for 
+// The total number of histograms searched for
 const unsigned int NHIST = 52;
+
+// If true, allow using external expectations for determining excess
+// If false, always run fit internally (since this job will determine what
+// the background is for other jobs)
+bool gextexp = true;
+
+enum stream_t {
+  fardet_t02, neardet_ddactivity1, fardet_ddenergy, neardet_long, fardet_long,
+  UNDEFINED_STREAM
+};
 
 struct popts{
   const char * name;
@@ -34,13 +44,24 @@ struct popts{
   // it in one window.  Otherwise zero.
   double extexp;
 
+  // Slope of background if the background is time varying
+  double extexp1;
+
   popts(const char * const name_, const unsigned int polyorder_,
-        const bool stattest_, const double extexp_ = 0)
+        const bool stattest_, const double extexp_ = 0, const double extexp1_ = 0)
   {
     name = name_;
     polyorder = polyorder_;
     stattest = stattest_;
-    extexp = extexp_;
+
+    // If we're evaluating the background, do not set the background
+    if(gextexp){
+      extexp = extexp_;
+      extexp1 = extexp1_;
+    }
+    else{
+      extexp = extexp1 = 0;
+    }
   }
 };
 
@@ -49,6 +70,11 @@ const double topmargin = 0.09 * textsize/0.07;
 
 bool dividebylivetime = false;
 bool longreadout = false;
+
+// Number of readout windows that the input data represents.  It is 1 for
+// looking at signal samples and more than when for background samples.
+int nwindows = 1;
+
 const char * outbase = NULL;
 const char * trigname = NULL;
 
@@ -195,9 +221,9 @@ void stylecanvas(TCanvas * c)
   }
   else{
     c->SetBottomMargin(0.143);
-    c->SetLeftMargin(0.125);
+    c->SetLeftMargin(0.175);
     c->SetRightMargin(0.02);
-    c->SetTopMargin(0.08);
+    c->SetTopMargin(0.085);
     c->SetTickx(1);
     c->SetTicky(1);
   }
@@ -385,7 +411,8 @@ void stylefitraw(TH1D * fitraw)
 // use that as the background.  Return the bin with the biggest
 // excess, or -1 if none has an interesting excess
 int bumphunt(TH1D * hist, TH1D * histlive, const int rebin,
-             const double extexp, unsigned int polyorder)
+             const double extexp, const double extexp1,
+             unsigned int polyorder)
 {
   if(histlive == NULL || !dividebylivetime)
     histlive = dummy_histlive(hist, rebin);
@@ -395,7 +422,8 @@ int bumphunt(TH1D * hist, TH1D * histlive, const int rebin,
   setup_mn(mn, polyorder);
 
   if(extexp > 0){
-    polyorder = 1;
+    polyorder = 1; // Just assume 1 (enforced by definition of popts) and
+                   // give the draw function enough paramters to do its work
   }
   else{
     fit(mn, hist, histlive, polyorder);
@@ -411,7 +439,8 @@ int bumphunt(TH1D * hist, TH1D * histlive, const int rebin,
                        hist->GetBinLowEdge(hist->GetNbinsX()+1));
 
   if(extexp > 0){
-    poly->SetParameter(0, extexp);
+    poly->SetParameter(0, rebin*extexp);
+    poly->SetParameter(1, rebin*extexp1);
   }
   else{
     for(unsigned int i = 0; i <= polyorder; i++)
@@ -444,7 +473,7 @@ int bumphunt(TH1D * hist, TH1D * histlive, const int rebin,
   double minprob = 1;
   double minprob_bin = 0;
   for(int i = 1; i <= hist->GetNbinsX(); i++){
-    if(histlive-> GetBinContent(i) == 0) continue;
+    if(histlive->GetBinContent(i) == 0) continue;
 
     const double expected = poly->Eval(hist->GetBinCenter(i))
       * histlive->GetBinContent(i);
@@ -474,8 +503,17 @@ int bumphunt(TH1D * hist, TH1D * histlive, const int rebin,
          actual, expected, histprob, globprob);
   int ret = -1;
   if(sigmacheck(globprob)) ret = minprob_bin;
-  printf("Number per second: %.5g\n", hist->Integral()/
-    histlive->Integral()/histlive->GetBinWidth(1));
+
+  if(extexp == 0){
+    if(polyorder == 0){
+      printf("Number per second: %.5g\n", hist->Integral()/
+        histlive->Integral()/histlive->GetBinWidth(1)/nwindows);
+    }
+    else if(polyorder == 1){
+      printf("Fit: %.5f + %.5ft\n", poly->GetParameter(0)/nwindows,
+                                    poly->GetParameter(1)/nwindows);
+    }
+  }
 
   // We'll consider the first N seconds after the event to be special
   const int specialbins = 10;
@@ -624,7 +662,9 @@ void process_rebin(TH1D *hist, TH1D * histlive,
   static TLatex * ltitle = new TLatex;
   ltitle->SetText(
     0.16 + leftmargin/2,
-    0.978 - (!dividebylivetime)*0.02, Form("%s: %s", trigname, opts.name));
+    0.978 - (!dividebylivetime)*0.02,
+    nwindows == 1? Form("%s: %s", trigname, opts.name)
+                 : Form("%s: %s x %d", trigname, opts.name, nwindows));
   ltitle->SetTextSize(dividebylivetime?textsize*textratiofull:textsize);
   ltitle->SetTextFont(42);
   ltitle->SetTextAlign(12);
@@ -703,7 +743,9 @@ void process_rebin(TH1D *hist, TH1D * histlive,
   }
   else{
     rebinned->GetYaxis()->SetTitleOffset(
-      (rebinned->GetEntries() < 10? 0.8: 1.1) / sqrt(textsize/0.05));
+      (rebinned->GetEntries() < 10? 0.8: rebinned->GetMaximum() < 1000?1.1:
+                                         rebinned->GetMaximum() < 10000?1.4:1.6)
+       / sqrt(textsize/0.05));
     if(rebin == 1)
       rebinned->GetYaxis()->SetTitle("Events/s");
     else
@@ -728,7 +770,7 @@ void process_rebin(TH1D *hist, TH1D * histlive,
     bumphunt_nonpoisson(divided);
   }
   else{
-    const int bestbin = bumphunt(hist, histlive, rebin, opts.extexp,
+    const int bestbin = bumphunt(hist, histlive, rebin, opts.extexp, opts.extexp1,
              std::min((unsigned int)(hist->Integral()), opts.polyorder));
     TPad * p = dividebylivetime? toppad: &USN;
     if(bestbin > 0){
@@ -746,7 +788,7 @@ void process(TH1D * hist, TH1D * histlive, const popts opts)
 {
   printf("\n%s: ", opts.name);
   process_rebin(hist, histlive,  1, opts);
-#if 1
+#if 0
   if(!longreadout) process_rebin(hist, histlive, 10, opts);
 #endif
 }
@@ -766,12 +808,29 @@ void DOIT(const char * const hname, const popts & opts)
 
 void ligopass2(const char * const infilename, const char * trigname_,
                const char * outbase_, const bool dividebylivetime_,
-               const bool longreadout_)
+               const bool longreadout_, const int nwindows_)
 {
   outbase = outbase_;
   dividebylivetime = dividebylivetime_;
   longreadout = longreadout_;
   trigname = trigname_;
+  if(nwindows_ > 1){
+    gextexp = false;
+    nwindows = nwindows_;
+    printf("Evaluating background using a sample of %d windows\n", nwindows);
+  }
+
+  enum stream_t stream = UNDEFINED_STREAM;
+  if     (!strcmp(trigname, "FD 10Hz trigger")) stream = fardet_t02;
+  else if(!strcmp(trigname, "ND energy"      )) stream = neardet_ddactivity1;
+  else if(!strcmp(trigname, "FD energy"      )) stream = fardet_ddenergy;
+  else if(!strcmp(trigname, "ND long readout")) stream = neardet_long;
+  else if(!strcmp(trigname, "FD long readout")) stream = fardet_long;
+
+  if(stream == UNDEFINED_STREAM){
+    fprintf(stderr, "I don't know what to do with \"%s\"\n", trigname);
+    exit(1);
+  }
 
   // Don't print about making PDFs
   gErrorIgnoreLevel = kWarning;
@@ -793,7 +852,6 @@ void ligopass2(const char * const infilename, const char * trigname_,
   stylecanvas(&USN);
   printstart();
 
-  // XXX Needs a manual background for ND
   DOIT("supernovalike",   popts("Supernova-like events", 0, true));
 
   DOIT("unslicedbighits", popts("Unsliced big hits",     0, trigname[0] == 'N'));
@@ -802,25 +860,42 @@ void ligopass2(const char * const infilename, const char * trigname_,
 
   // Skip these for the ND long readout, since they are redundant with the 100%
   // efficient ND ddactivity1 trigger.
-  if( strcmp(trigname, "ND long readout") ){
-    // XXX ND needs its background measured externally
-    DOIT("contained_slices",             popts("Contained slices",          0, true));
+  if(stream != neardet_long){
+
+    // XXX Need a better way of loading background numbers in than manually
+    // placing in the code, since they will be different for different signal events
+    DOIT("contained_slices",
+         popts("Contained slices", 0, true,
+               stream == neardet_ddactivity1? 0.00096429:0));
 
     DOIT("tracks",                       popts("Slices with tracks",        0, true));
     DOIT("tracks_point_1",               popts("Slices w/ tracks, 16#circ", 1, true));
-    DOIT("tracks_point_0",               popts("Slices w/ tracks, 1.3#circ",1, true));
+    DOIT("tracks_point_0",
+         popts("Slices w/ tracks, 1.3#circ",1, true,
+               stream == neardet_ddactivity1? 0.046: 0,
+               stream == neardet_ddactivity1? 0.000: 0));
+
+
     DOIT("halfcontained_tracks",         popts("Stopping tracks",           0, true));
-    DOIT("halfcontained_tracks_point_1", popts("Stopping tracks, 16#circ",  1, true));
+    DOIT("halfcontained_tracks_point_1",
+         popts("Stopping tracks, 16#circ",  1, true,
+               stream == neardet_ddactivity1? 0.05743: 0,
+               stream == neardet_ddactivity1? 0.00000: 0));
 
-    // XXX Maybe needs a manual *time-varying* background for FD t02, definitely for ND
-    DOIT("halfcontained_tracks_point_0", popts("Stopping tracks, 1.3#circ", 1, true));
+    DOIT("halfcontained_tracks_point_0",
+         popts("Stopping tracks, 1.3#circ", 1, true,
+               stream == neardet_ddactivity1? 0.00087: 0,
+               stream == neardet_ddactivity1? 0.00000: 0));
 
-    // XXX All three (nine) of these need their backgrounds measured externally
-    DOIT("fullycontained_tracks",        popts("Contained tracks",          0, true));
+    DOIT("fullycontained_tracks",
+         popts("Contained tracks",          0, true,
+               stream == neardet_ddactivity1? 1.7857e-05: 0));
+
     DOIT("fullycontained_tracks_point_1",popts("Contained tracks, 16#circ", 1, true));
-    DOIT("fullycontained_tracks_point_0",popts("Contained tracks, 1.3#circ",1, true));
 
-    // XXX Except for FD inclusive, all these need their backgrounds measured externally
+    DOIT("fullycontained_tracks_point_0",
+         popts("Contained tracks, 1.3#circ",1, true));
+
     DOIT("upmu_tracks",                  popts("Upward going muons",        0, true));
     DOIT("upmu_tracks_point_1",          popts("Up-#mu, 16#circ",           1, true));
     DOIT("upmu_tracks_point_0",          popts("Up-#mu, 1.3#circ",          1, true));
@@ -832,7 +907,6 @@ void ligopass2(const char * const infilename, const char * trigname_,
     DOIT("energy_high_cut",              popts(">50M ADC total",       0, true, 0.0016));
     DOIT("energy_high_cut_pertime",      popts(">25M ADC per 50#mus",  0, true, 0.0027));
 
-    // XXX Need higher statistics for background
     DOIT("energy_vhigh_cut",             popts(">500M ADC total",      0, true, 4e-5));
     DOIT("energy_vhigh_cut_pertime",     popts(">250M ADC per 50#mus", 0, true, 4e-5));
   }
