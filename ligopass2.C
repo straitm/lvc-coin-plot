@@ -507,11 +507,13 @@ int bumphunt(TH1D * hist, TH1D * histlive, const int rebin,
   if(extexp == 0){
     if(polyorder == 0){
       printf("Number per second: %.5g\n", hist->Integral()/
-        histlive->Integral()/histlive->GetBinWidth(1)/nwindows);
+        histlive->Integral()/histlive->GetBinWidth(1)
+          /(dividebylivetime?1:nwindows));
     }
     else if(polyorder == 1){
-      printf("Fit: %.5f + %.5ft\n", poly->GetParameter(0)/nwindows,
-                                    poly->GetParameter(1)/nwindows);
+      printf("Fit: %.5f + %.5ft\n",
+             poly->GetParameter(0)/(dividebylivetime?1:nwindows),
+             poly->GetParameter(1)/(dividebylivetime?1:nwindows));
     }
   }
 
