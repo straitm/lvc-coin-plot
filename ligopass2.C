@@ -638,12 +638,16 @@ void bumphunt_nonpoisson(TH1D * h)
     if(longreadout && h->GetBinCenter(i) > np_longreadoutmin) continue;
     if(!longreadout && h->GetBinCenter(i) < np_notlongreadoutmax) continue;
 
-    // XXX janky, but not as janky as just taking the central value.
-    // In most cases, the error is quite small, but this protects against
-    // bins with low livetime.
-    const double content = h->GetBinContent(i) - h->GetBinError(i);
+    const double content = h->GetBinContent(i);
 
-    const double localsigma = (content - mean)/sigma;
+    // Important to take the bin error into account, even though it is
+    // a bit of double-counting, or else low livetime bins look like
+    // big excesses.  The double-counting is only significant if the
+    // errors are large compared to the spread, in which case, we probably
+    // shouldn't be using this sort of search.
+    const double localsigma = (content - mean)/
+      sqrt(pow(sigma, 2) + pow(h->GetBinError(i), 2));
+
     const int trials = longreadout?40:500; // XXX fragile
     const double localprob = ROOT::Math::gaussian_cdf_c(localsigma);
     const double histprob = lookelse(localprob, trials);
