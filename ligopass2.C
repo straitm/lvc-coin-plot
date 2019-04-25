@@ -50,7 +50,8 @@ struct popts{
   double extexp1;
 
   popts(const char * const name_, const unsigned int polyorder_,
-        const bool stattest_, const double extexp_ = 0, const double extexp1_ = 0)
+        const bool stattest_, const double extexp_ = 0,
+        const double extexp1_ = 0)
   {
     name = name_;
     polyorder = polyorder_;
@@ -111,8 +112,8 @@ TH1D * getordont(const char * const histname, TDirectory * const ligodir)
     if(livehist){
       if(lastlive != NULL){
         printf(
-          "Warning: Substituting previous livetime.  As long as different\n"
-          "selections don't somehow have different livetimes, this is fine.\n");
+        "Warning: Substituting previous livetime.  As long as different\n"
+        "selections don't somehow have different livetimes, this is fine.\n");
         return lastlive;
       }
       else{
@@ -226,7 +227,7 @@ void stylecanvas(TCanvas * c)
     c->SetBottomMargin(0.143);
     c->SetLeftMargin(0.175);
     c->SetRightMargin(0.02);
-    c->SetTopMargin(0.085);
+    c->SetTopMargin(0.12);
     c->SetTickx(1);
     c->SetTicky(1);
   }
@@ -348,7 +349,8 @@ bool sigmacheck(const double p)
   return false;
 }
 
-void fit(TMinuit & mn, TH1D * hist, TH1D * histlive, const unsigned int polyorder)
+void fit(TMinuit & mn, TH1D * hist, TH1D * histlive,
+         const unsigned int polyorder)
 {
   fithist = hist;
   fithistlive = histlive;
@@ -363,7 +365,7 @@ void fit(TMinuit & mn, TH1D * hist, TH1D * histlive, const unsigned int polyorde
     mn.Command(Form("REL %d", i+1));
     mn.Command("MINIMIZE");
 
-    // Since we use fabs() in the FCN to avoid warnings, we have to fix it here...
+    // Since we use fabs() in the FCN to avoid warnings, have to fix it here...
     if((polyorder == 0 || i == 0) && getpar(mn, 0) < 0){
       mn.Command(Form("SET PAR 1 %f\n", fabs(getpar(mn, 0))));
       mn.Command("MINIMIZE");
@@ -570,7 +572,7 @@ void novapreliminary()
   t->SetNDC();
   t->SetTextAlign(32);
   t->SetX(1 - rightmargin - 0.02);
-  t->SetY(1 -  topmargin  + 0.01 - (!dividebylivetime)*0.06);
+  t->SetY(1 -  topmargin  + 0.01 - (!dividebylivetime)*0.085);
   t->Draw();
 }
 
@@ -678,13 +680,19 @@ void process_rebin(TH1D *hist, TH1D * histlive,
   // on all the output PDFs.
   static TLatex * ltitle = new TLatex;
 
-  // XXX Having the filename in the title is for debugging and needs to be taken out for publication
+  char title[1024];
+  strncpy(title, infilename, 1024);
+  if(NULL != strstr(title, "Z"))
+    *(strstr(title, "Z")+1) = '\0';
+
   ltitle->SetText(
     0.16 + leftmargin/2,
-    0.978 - (!dividebylivetime)*0.02,
-    nwindows == 1? Form("#splitline{%s}{%s: %s}", infilename, trigname, opts.name)
-                 : Form("#splitline{%s}{%s: %s x %d}", infilename, trigname, opts.name, nwindows));
-  ltitle->SetTextSize(0.6*(dividebylivetime?textsize*textratiofull:textsize));
+    0.978 - (!dividebylivetime)*0.045,
+    nwindows == 1? Form("#splitline{%s}{%s: %s}", title, trigname, opts.name)
+                 : Form("#splitline{%s}{%s: %s x %d}", title, trigname,
+                        opts.name, nwindows));
+  ltitle->SetTextSize(9./11.*
+                     (dividebylivetime?textsize*textratiofull:textsize));
   ltitle->SetTextFont(42);
   ltitle->SetTextAlign(12);
   ltitle->SetNDC();
@@ -698,11 +706,13 @@ void process_rebin(TH1D *hist, TH1D * histlive,
   if(longreadout && rebin == 1){
     mint = -10, maxt = 45;
     rebinned->GetXaxis()->SetRangeUser(mint, maxt);
-    if(rebinnedlive != NULL) rebinnedlive->GetXaxis()->SetRangeUser(mint, maxt);
+    if(rebinnedlive != NULL)
+      rebinnedlive->GetXaxis()->SetRangeUser(mint, maxt);
   }
 
 
-  TH1D * divided=dividebylivetime?divide_livetime(rebinned, rebinnedlive):rebinned;
+  TH1D * divided
+    = dividebylivetime?divide_livetime(rebinned, rebinnedlive):rebinned;
   if(dividebylivetime){
     if(rebin == 1){
        divided->GetXaxis()->SetRangeUser(mint, maxt);
@@ -712,8 +722,8 @@ void process_rebin(TH1D *hist, TH1D * histlive,
       double extramax = 0, extramin = 0;
 
       for(int i = 1; i <= divided->GetNbinsX(); i++){
-        const double vmin = divided->GetBinContent(i) - divided->GetBinError(i);
-        const double vmax = divided->GetBinContent(i) + divided->GetBinError(i);
+        const double vmin = divided->GetBinContent(i)-divided->GetBinError(i);
+        const double vmax = divided->GetBinContent(i)+divided->GetBinError(i);
         const double e = divided->GetBinError(i);
         if(vmax > maxy){
            maxy = vmax;
@@ -762,8 +772,8 @@ void process_rebin(TH1D *hist, TH1D * histlive,
   }
   else{
     rebinned->GetYaxis()->SetTitleOffset(
-      (rebinned->GetEntries() < 10? 0.8: rebinned->GetMaximum() < 1000?1.1:
-                                         rebinned->GetMaximum() < 10000?1.4:1.6)
+      (rebinned->GetEntries() < 10? 0.8: rebinned->GetMaximum()<1000?1.1:
+                                         rebinned->GetMaximum()<10000?1.4:1.6)
        / sqrt(textsize/0.05));
     if(rebin == 1)
       rebinned->GetYaxis()->SetTitle("Events/s");
@@ -778,7 +788,8 @@ void process_rebin(TH1D *hist, TH1D * histlive,
 
   if(opts.extexp > 0){
     TH1 * h = dividebylivetime? divided: rebinned;
-    h->GetYaxis()->SetTitleOffset(h->GetYaxis()->GetTitleOffset()*(dividebylivetime? 1: 1.4));
+    h->GetYaxis()->SetTitleOffset(h->GetYaxis()->GetTitleOffset()
+                                  *(dividebylivetime? 1: 1.4));
     h->GetYaxis()->SetRangeUser(opts.extexp/2, h->GetMaximum()*8);
   }
   (dividebylivetime?toppad:&USN)->SetLogy(opts.extexp > 0);
@@ -790,8 +801,9 @@ void process_rebin(TH1D *hist, TH1D * histlive,
     bumphunt_nonpoisson(divided);
   }
   else{
-    const int bestbin = bumphunt(hist, histlive, rebin, opts.extexp, opts.extexp1,
-             std::min((unsigned int)(hist->Integral()), opts.polyorder));
+    const int bestbin =
+      bumphunt(hist, histlive, rebin, opts.extexp, opts.extexp1,
+               std::min((unsigned int)(hist->Integral()), opts.polyorder));
     TPad * p = dividebylivetime? toppad: &USN;
     if(bestbin > 0){
       p->cd();
@@ -826,6 +838,22 @@ void DOIT(const char * const hname, const popts & opts)
   if(!dividebylivetime || hlive != NULL) process(h, hlive, opts);
 }
 
+enum stream_t decodestream(const char * const trigname)
+{
+  enum stream_t stream = UNDEFINED_STREAM;
+  if     (!strcmp(trigname, "FD 10Hz trigger")) stream = fardet_t02;
+  else if(!strcmp(trigname, "ND energy"      )) stream = neardet_ddactivity1;
+  else if(!strcmp(trigname, "FD energy"      )) stream = fardet_ddenergy;
+  else if(!strcmp(trigname, "ND long readout")) stream = neardet_long;
+  else if(!strcmp(trigname, "FD long readout")) stream = fardet_long;
+
+  if(stream == UNDEFINED_STREAM){
+    fprintf(stderr, "I don't know what to do with \"%s\"\n", trigname);
+    exit(1);
+  }
+  return stream;
+}
+
 void ligopass2(const char * const infilename_, const char * trigname_,
                const char * outbase_, const bool dividebylivetime_,
                const bool longreadout_, const int nwindows_)
@@ -841,20 +869,9 @@ void ligopass2(const char * const infilename_, const char * trigname_,
     printf("Evaluating background using a sample of %d windows\n", nwindows);
   }
 
-  enum stream_t stream = UNDEFINED_STREAM;
-  if     (!strcmp(trigname, "FD 10Hz trigger")) stream = fardet_t02;
-  else if(!strcmp(trigname, "ND energy"      )) stream = neardet_ddactivity1;
-  else if(!strcmp(trigname, "FD energy"      )) stream = fardet_ddenergy;
-  else if(!strcmp(trigname, "ND long readout")) stream = neardet_long;
-  else if(!strcmp(trigname, "FD long readout")) stream = fardet_long;
+  enum stream_t stream = decodestream(trigname);
 
-  if(stream == UNDEFINED_STREAM){
-    fprintf(stderr, "I don't know what to do with \"%s\"\n", trigname);
-    exit(1);
-  }
-
-  // Don't print about making PDFs
-  gErrorIgnoreLevel = kWarning;
+  gErrorIgnoreLevel = kWarning; // Don't print about making PDFs
 
   TFile * ligofile = new TFile(infilename, "read");
   if(!ligofile || ligofile->IsZombie()){
@@ -863,7 +880,8 @@ void ligopass2(const char * const infilename_, const char * trigname_,
   }
 
   ligodir = dynamic_cast<TDirectory*>(ligofile->Get("ligoanalysis"));
-  if(ligodir == NULL) ligodir = dynamic_cast<TDirectory*>(ligofile->Get("ligo"));
+  if(ligodir == NULL)
+    ligodir = dynamic_cast<TDirectory*>(ligofile->Get("ligo"));
 
   if(ligodir == NULL){
     fprintf(stderr, "No \"ligoanalysis\" directory in this file\n");
@@ -887,9 +905,6 @@ void ligopass2(const char * const infilename_, const char * trigname_,
     printend();
     return;
   }
-
-  // XXX Need a better way of loading background numbers in than manually
-  // placing in the code, since they will be different for different signal events
 
   DOIT("tracks", popts("Slices with tracks", 0, true));
 
@@ -951,15 +966,20 @@ void ligopass2(const char * const infilename_, const char * trigname_,
              (stream & fardet_minbias)? 0.045: 0,
              (stream & fardet_minbias)? -0.00022: 0));
 
-  DOIT("rawtrigger",               popts("Raw triggers",         0, true));
-  DOIT("energy_low_cut",           popts(">5M ADC total",        0, true));
-  DOIT("energy_low_cut_pertime",   popts(">2.5M ADC per 50#mus", 0, true));
-
-  DOIT("energy_high_cut",          popts(">50M ADC total",       0, true, 0.0010));
-  DOIT("energy_high_cut_pertime",  popts(">25M ADC per 50#mus",  0, true, 0.0021));
-
-  DOIT("energy_vhigh_cut",         popts(">500M ADC total",      0, true, 4e-5));
-  DOIT("energy_vhigh_cut_pertime", popts(">250M ADC per 50#mus", 0, true, 4e-5));
+  DOIT("rawtrigger",
+       popts("Raw triggers",         0, true));
+  DOIT("energy_low_cut",
+       popts(">5M ADC total",        0, true));
+  DOIT("energy_low_cut_pertime",
+       popts(">2.5M ADC per 50#mus", 0, true));
+  DOIT("energy_high_cut",
+       popts(">50M ADC total",       0, true, 0.0010));
+  DOIT("energy_high_cut_pertime",
+       popts(">25M ADC per 50#mus",  0, true, 0.0021));
+  DOIT("energy_vhigh_cut",
+       popts(">500M ADC total",      0, true, 4e-5));
+  DOIT("energy_vhigh_cut_pertime",
+       popts(">250M ADC per 50#mus", 0, true, 4e-5));
 
   printend();
 }

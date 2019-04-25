@@ -19,25 +19,25 @@ else
   nwindows=1
 fi
 
-if echo $histfile | grep fardet-t02; then
+if echo $histfile | grep -q fardet-t02; then
   trigname="FD 10Hz trigger"
   livetimediv=1
   longreadout=0
-elif echo $histfile | grep neardet-ddactivity1; then
+elif echo $histfile | grep -q neardet-ddactivity1; then
   trigname="ND energy"
   livetimediv=0
   longreadout=0
-elif echo $histfile | grep fardet-ddenergy; then
+elif echo $histfile | grep -q fardet-ddenergy; then
   trigname="FD energy"
   livetimediv=0
   longreadout=0
-elif echo $histfile | grep neardet-ddsnews ||
-     echo $histfile | grep neardet-ligo; then
+elif echo $histfile | grep -q neardet-ddsnews ||
+     echo $histfile | grep -q neardet-ligo; then
   trigname="ND long readout"
   livetimediv=1
   longreadout=1
-elif echo $histfile | grep fardet-ddsnews ||
-     echo $histfile | grep fardet-ligo; then
+elif echo $histfile | grep -q fardet-ddsnews ||
+     echo $histfile | grep -q fardet-ligo; then
   trigname="FD long readout"
   livetimediv=1
   longreadout=1
