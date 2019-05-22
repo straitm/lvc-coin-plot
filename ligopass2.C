@@ -15,6 +15,7 @@
 #include "TAxis.h"
 #include "TStyle.h"
 #include "TEllipse.h"
+#include <fstream>
 
 //#define DEBUG
 //#define SEPARATEPDFS
@@ -69,7 +70,7 @@ struct popts{
 };
 
 const double textsize = 0.07;
-const double topmargin = 0.09 * textsize/0.07;
+const double topmargin = 0.11 * textsize/0.07;
 
 bool dividebylivetime = false;
 bool longreadout = false;
@@ -331,20 +332,32 @@ double lookelse(const double localprob, const int trials)
 }
 
 // Checks whether the probability 'p' is exciting, prints a message if
-// it is, and returns whether it is.
-bool sigmacheck(const double p)
+// it is, and returns whether it is.  Check what the expected number
+// of events was, though, because a very small number means that we
+// don't really know what sigma is.
+bool sigmacheck(const double p, const double expected)
 {
-  const unsigned int nlev = 2;
-  const double lev[nlev] = { 5, 3 };
+  const unsigned int nlev = 3;
+  const double lev[nlev] = { 5, 3, 2 };
 
   for(unsigned int i = 0; i < nlev; i++)
     if(p < (1-ROOT::Math::gaussian_cdf(lev[i], 1))*2){
-      printf("*******************************************\n"
-             "*******************************************\n"
-             "*******  That's more than %.0f sigma   *******\n"
-             "*******************************************\n"
-             "*******************************************\n", lev[i]);
-      return true;
+      if(expected > 1e-50){
+        printf("*******************************************\n"
+               "*******************************************\n"
+               "*******  That's more than %.0f sigma   *******\n"
+               "*******************************************\n"
+               "*******************************************\n", lev[i]);
+        return true;
+      }
+      else{
+        printf("*******************************************\n"
+               "*******************************************\n"
+               "*******  Need a better background est! *******\n"
+               "*******************************************\n"
+               "*******************************************\n");
+        return false;
+      }
     }
   return false;
 }
@@ -510,7 +523,7 @@ int bumphunt(TH1D * hist, TH1D * histlive, const int rebin,
            (int)hist->GetBinLowEdge(minprob_bin+1),
            actual, expected, histprob, globprob);
   int ret = -1;
-  if(sigmacheck(globprob)) ret = minprob_bin;
+  if(sigmacheck(globprob, expected)) ret = minprob_bin;
 
   if(extexp == 0){
     if(polyorder == 0){
@@ -543,7 +556,7 @@ int bumphunt(TH1D * hist, TH1D * histlive, const int rebin,
     if(sglobprob < 0.5)
       printf("This was in first %ds. P: %.2g (%.2g global)\n",
              specialbins, shistprob, sglobprob);
-    sigmacheck(sglobprob);
+    sigmacheck(sglobprob, expected);
   }
 
   return ret;
@@ -560,7 +573,7 @@ void randomtime()
   t->SetX(0.5);
   t->SetY(0.5);
   t->SetTextAngle(55);
-  t->Draw();
+  //t->Draw();
 }
 
 void novapreliminary()
@@ -599,12 +612,22 @@ void draw_nonpoisson_f(const double n, const int width, const int color)
   fdot->Draw("same");
 }
 
+__attribute__((unused)) void printhist(TH1D & h)
+{
+  for(int i = 1; i <= h.GetNbinsX(); i++){
+    const int n = h.GetBinContent(i)*80/h.GetMaximum();
+    for(int j = 0; j < n; j++) printf("#");
+    printf("\n");
+  }
+  printf("\n");
+}
+
 // Search for excursions from normal behavior for a series that isn't
 // Poissonian, like the total number of hits, which obviously has a lot
 // of correlated activity.
 void bumphunt_nonpoisson(TH1D * h)
 {
-  TH1D side("side", "", 100, h->GetMinimum(), h->GetMaximum()*1.001);
+  TH1D side("side", "", 100, h->GetMinimum()*0.999, h->GetMaximum()*1.001);
 
   for(int i = 1; i <= h->GetNbinsX(); i++){
     if(longreadout && h->GetBinCenter(i) < np_longreadoutmin) continue;
@@ -618,13 +641,23 @@ void bumphunt_nonpoisson(TH1D * h)
     return;
   }
 
-  side.Fit("gaus", "l0q");
-  if(side.GetFunction("gaus") == NULL){
-    fprintf(stderr, "Fit failed in bumphunt_nonpoisson on %s\n", h->GetName());
+  TF1 Gaus("g", "[0]*exp(-pow(x-[1],2)/(2*[2]*[2]))",
+    h->GetMinimum()*0.999, h->GetMaximum()*1.001);
+  Gaus.SetParameter(0, 10);
+  Gaus.SetParameter(1, (h->GetMaximum()+h->GetMinimum())/2);
+  Gaus.SetParameter(2, (h->GetMaximum()-h->GetMinimum())/10);
+
+  // Important to prevent Fit from going crazy if there are outliers
+  Gaus.SetParLimits(1, h->GetMinimum(), h->GetMaximum());
+
+  side.Fit("g", "l0");
+
+  if(side.GetFunction("g") == NULL){
+    fprintf(stderr, "Fit failed in bumphunt_nonpoisson on %s\n",h->GetName());
     return;
   }
-  const double mean = side.GetFunction("gaus")->GetParameter(1);
-  const double sigma = side.GetFunction("gaus")->GetParameter(2);
+  const double mean = side.GetFunction("g")->GetParameter(1);
+  const double sigma = side.GetFunction("g")->GetParameter(2);
 
   toppad->cd();
 
@@ -656,10 +689,12 @@ void bumphunt_nonpoisson(TH1D * h)
     const double histsigma = ROOT::Math::gaussian_quantile_c(histprob, 1);
     const double globsigma = ROOT::Math::gaussian_quantile_c(globprob, 1);
 
-    if(sigmacheck(globprob)){
-      printf("{%d, %d} %.1fsigma local, %.1fsigma in hist, %.1fsigma global\n",
+    if(sigmacheck(globprob, mean)){
+      printf("{%d, %d} %f with %f expected\n"
+             "P = %.1g local, %.1g in hist, %.1g global\n",
          (int)h->GetBinLowEdge(i), (int)h->GetBinLowEdge(i+1),
-         localsigma, histsigma, globsigma);
+         content, mean,
+         localprob, histprob, globprob);
       styledrawellipse(new TEllipse(h->GetBinCenter(i), h->GetBinContent(i),
         longreadout?0.55:10, (toppad->GetUymax()-toppad->GetUymin())/30));
     }
@@ -691,7 +726,7 @@ void process_rebin(TH1D *hist, TH1D * histlive,
 
   ltitle->SetText(
     0.16 + leftmargin/2,
-    0.978 - (!dividebylivetime)*0.045,
+    0.968 - (!dividebylivetime)*0.030,
     nwindows == 1? Form("#splitline{%s}{%s: %s}", title, trigname, opts.name)
                  : Form("#splitline{%s}{%s: %s x %d}", title, trigname,
                         opts.name, nwindows));
@@ -831,15 +866,21 @@ void process(TH1D * hist, TH1D * histlive, const popts opts)
 
 TDirectory * ligodir = NULL;
 
-void DOIT(const char * const hname, const popts & opts)
+// Return true iff we did something
+bool DOIT(const char * const hname, const popts & opts)
 {
   TH1D * h = getordont(hname, ligodir);
-  if(h == NULL) return;
+  if(h == NULL) return false;
 
   TH1D * hlive = !dividebylivetime ? NULL
     : getordont(Form("%slive", hname), ligodir);
 
-  if(!dividebylivetime || hlive != NULL) process(h, hlive, opts);
+  if(!dividebylivetime || hlive != NULL){
+    process(h, hlive, opts);
+    return true;
+  }
+
+  return false;
 }
 
 enum stream_t decodestream(const char * const trigname)
@@ -858,15 +899,37 @@ enum stream_t decodestream(const char * const trigname)
   return stream;
 }
 
+std::map<std::string, double> readbg(const char * const bgfile)
+{
+  std::ifstream infile(bgfile);
+  if(!infile.is_open()){
+    fprintf(stderr, "Could not open %s\n", bgfile);
+    exit(1);
+  }
+  std::string key;
+  double value;
+  std::map<std::string, double> extbg;
+  while(infile >> key >> value) extbg[key] = value;
+  return extbg;
+}
+
 void ligopass2(const char * const infilename_, const char * trigname_,
                const char * outbase_, const bool dividebylivetime_,
-               const bool longreadout_, const int nwindows_)
+               const bool longreadout_, const int nwindows_,
+               const char * const bgfile)
 {
   infilename = infilename_;
   outbase = outbase_;
   dividebylivetime = dividebylivetime_;
   longreadout = longreadout_;
   trigname = trigname_;
+
+  TFile * ligofile = new TFile(infilename, "read");
+  if(!ligofile || ligofile->IsZombie()){
+    fprintf(stderr, "Could not open your histogram file %s\n", infilename);
+    exit(1);
+  }
+
   if(nwindows_ > 1){
     gextexp = false;
     nwindows = nwindows_;
@@ -876,12 +939,6 @@ void ligopass2(const char * const infilename_, const char * trigname_,
   enum stream_t stream = decodestream(trigname);
 
   gErrorIgnoreLevel = kWarning; // Don't print about making PDFs
-
-  TFile * ligofile = new TFile(infilename, "read");
-  if(!ligofile || ligofile->IsZombie()){
-    fprintf(stderr, "Could not open your histogram file %s\n", infilename);
-    exit(1);
-  }
 
   ligodir = dynamic_cast<TDirectory*>(ligofile->Get("ligoanalysis"));
   if(ligodir == NULL)
@@ -895,16 +952,22 @@ void ligopass2(const char * const infilename_, const char * trigname_,
   stylecanvas(&USN);
   printstart();
 
+  const bool is_ddactivity1 = stream == neardet_ddactivity1,
+             is_fdminbias = (stream & fardet_minbias),
+             is_ndminbias = stream == neardet_long;
+
+  if(DOIT("blind", popts("Livetime report only", 0, true, 0))){
+    printend();
+    return; // Make double-sure we stay blind if this is a blind report
+  }
+
   DOIT("supernovalike",
-       popts("Supernova-like events", 0, true,
-             stream == neardet_long? 0.53: 0));
+       popts("Supernova-like events", 0, true, is_ndminbias? 0.53: 0));
 
   DOIT("unslicedbighits", popts("Unsliced big hits", 0, trigname[0] == 'N'));
   DOIT("unslicedhits",    popts("Unsliced hits",     0, trigname[0] == 'N'));
 
-
-  // Skip rest for ND long readout, since they are redundant with the 100%
-  // efficient ND ddactivity1 trigger.
+  // Skip rest, since it's redundant w/ 100% efficient ddactivity1.
   if(stream == neardet_long){
     printend();
     return;
@@ -914,61 +977,70 @@ void ligopass2(const char * const infilename_, const char * trigname_,
 
   DOIT("tracks_point_1", popts("Slices w/ tracks, 16#circ", 1, true));
 
+  std::map<std::string, double> extbg = readbg(bgfile);
+
   DOIT("tracks_point_0",
-       popts("Slices w/ tracks, 1.3#circ",1, true,
-             stream == neardet_ddactivity1? 0.0431: 0,
-             stream == neardet_ddactivity1? -1.3e-5: 0));
+    popts("Slices w/ tracks, 1.3#circ",1, true,
+          is_ddactivity1? extbg.at("TRACKS_POINT_0_DDACTIVITY1_P0"): 0,
+          is_ddactivity1? extbg.at("TRACKS_POINT_0_DDACTIVITY1_P1"): 0));
 
   DOIT("halfcontained_tracks",
        popts("Stopping tracks", 0, true,
-             stream == neardet_ddactivity1? 0.401: 0));
+             is_ddactivity1? 0.401: 0));
 
   DOIT("halfcontained_tracks_point_1",
-       popts("Stopping tracks, 16#circ", 1, true,
-             stream == neardet_ddactivity1? 0.048: 0,
-             stream == neardet_ddactivity1? -2e-6: 0));
+    popts("Stopping tracks, 16#circ", 1, true,
+    is_ddactivity1?extbg.at("HALFCONTAINED_TRACKS_POINT_1_DDACTIVITY1_P0"): 0,
+    is_ddactivity1?extbg.at("HALFCONTAINED_TRACKS_POINT_1_DDACTIVITY1_P1"): 0)
+    );
 
   DOIT("halfcontained_tracks_point_0",
-       popts("Stopping tracks, 1.3#circ", 1, true,
-             stream == neardet_ddactivity1? 0.00061:
-             (stream & fardet_minbias)? 13.5: 0,
-             stream == neardet_ddactivity1? -2e-7:
-             (stream & fardet_minbias)? -0.002: 0));
+    popts("Stopping tracks, 1.3#circ", 1, true,
+    is_ddactivity1? extbg.at("HALFCONTAINED_TRACKS_POINT_0_DDACTIVITY1_P0"):
+    is_fdminbias?   extbg.at("HALFCONTAINED_TRACKS_POINT_0_FDMINBIAS_P0"): 0,
+    is_ddactivity1? extbg.at("HALFCONTAINED_TRACKS_POINT_0_DDACTIVITY1_P1"):
+    is_fdminbias?   extbg.at("HALFCONTAINED_TRACKS_POINT_0_FDMINBIAS_P1"): 0)
+    );
 
   DOIT("fullycontained_tracks",
        popts("Contained tracks", 0, true,
-             stream == neardet_ddactivity1? 2.8e-5:
-             (stream & fardet_minbias)? 0.45: 0));
+             is_ddactivity1? 2.8e-5:
+             is_fdminbias? 0.45: 0));
 
-  // For ddactivity1, have only found one, worry about it if there's signal
   DOIT("fullycontained_tracks_point_1",
-       popts("Contained tracks, 16#circ", 1, true,
-             (stream & fardet_minbias)? 0.09: 0,
-             (stream & fardet_minbias)? -0.00019: 0));
+    popts("Contained tracks, 16#circ", 1, true,
+    is_ddactivity1? extbg.at("FULLYCONTAINED_TRACKS_POINT_1_DDACTIVITY1_P0"):
+    is_fdminbias?   extbg.at("FULLYCONTAINED_TRACKS_POINT_1_FDMINBIAS_P0"): 0,
+    is_ddactivity1? extbg.at("FULLYCONTAINED_TRACKS_POINT_1_DDACTIVITY1_P1"):
+    is_fdminbias?   extbg.at("FULLYCONTAINED_TRACKS_POINT_1_FDMINBIAS_P1"): 0)
+    );
 
-  // For ddactivity1, have found none, worry about it if there's signal
   DOIT("fullycontained_tracks_point_0",
-       popts("Contained tracks, 1.3#circ",1, true,
-             (stream & fardet_minbias)? 0.0035: 0));
+    popts("Contained tracks, 1.3#circ",1, true,
+    is_ddactivity1? extbg.at("FULLYCONTAINED_TRACKS_POINT_0_DDACTIVITY1_P0"):
+    is_fdminbias?   extbg.at("FULLYCONTAINED_TRACKS_POINT_0_FDMINBIAS_P0"): 0,
+    is_ddactivity1? extbg.at("FULLYCONTAINED_TRACKS_POINT_0_DDACTIVITY1_P1"):
+    is_fdminbias?   extbg.at("FULLYCONTAINED_TRACKS_POINT_0_FDMINBIAS_P1"): 0)
+    );
 
   DOIT("contained_slices",
        popts("Contained slices", 0, true,
-             stream == neardet_ddactivity1? 0.00093:
-             (stream & fardet_minbias)? 24.085: 0));
+             is_ddactivity1? 0.00093:
+             is_fdminbias? 24.085: 0));
 
   DOIT("upmu_tracks",
        popts("Upward going muons", 0, true,
-             (stream & fardet_minbias)? 1.98: 0));
+             is_fdminbias? 1.98: 0));
 
   DOIT("upmu_tracks_point_1",
        popts("Up-#mu, 16#circ", 1, true,
-             (stream & fardet_minbias)? 0.68: 0,
-             (stream & fardet_minbias)? -0.0005: 0));
+             is_fdminbias? extbg.at("UPMU_TRACKS_POINT_1_FDMINBIAS_P0"): 0,
+             is_fdminbias? extbg.at("UPMU_TRACKS_POINT_1_FDMINBIAS_P1"): 0));
 
   DOIT("upmu_tracks_point_0",
        popts("Up-#mu, 1.3#circ", 1, true,
-             (stream & fardet_minbias)? 0.045: 0,
-             (stream & fardet_minbias)? -0.00022: 0));
+             is_fdminbias? extbg.at("UPMU_TRACKS_POINT_0_FDMINBIAS_P0"): 0,
+             is_fdminbias? extbg.at("UPMU_TRACKS_POINT_0_FDMINBIAS_P1"): 0));
 
   DOIT("rawtrigger",
        popts("Raw triggers",         0, true));
@@ -981,9 +1053,9 @@ void ligopass2(const char * const infilename_, const char * trigname_,
   DOIT("energy_high_cut_pertime",
        popts(">25M ADC per 50#mus",  0, true, 0.0021));
   DOIT("energy_vhigh_cut",
-       popts(">500M ADC total",      0, true, 4e-5));
+      popts(">500M ADC total",      0, true, 1e-100));
   DOIT("energy_vhigh_cut_pertime",
-       popts(">250M ADC per 50#mus", 0, true, 4e-5));
+       popts(">250M ADC per 50#mus", 0, true, 1e-100));
 
   printend();
 }
