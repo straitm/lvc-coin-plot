@@ -1,13 +1,27 @@
 #!/bin/bash
 
-if [ $# -ne 1 ]; then
+if [ $# -ne 1 ] && [ $# -ne 2 ]; then
   echo Wrong number of arguments $#
-  echo Syntax: $(basename $0) histfile
+  echo Syntax: $(basename $0) histfile GWeventname
+  echo Or: $(basename $0) histfile
   echo Histfile has to have a standard trigger name in it
+  echo GWeventname should match a background file name
+  echo I will try to infer the GWeventname if you do not give it
   exit 1
 fi
 
 histfile=$1
+
+if [ $2 ]; then
+  gwname=$2
+elif [ "$(dirname "$histfile")" != . ]; then
+  gwname=$(basename "$(dirname "$histfile")")
+  echo I got gwname = $gwname from the full path.  I hope that is right.
+else
+  gwname=$(basename "$PWD")
+  gwname=${gwname##*-}
+  echo I got gwname = $gwname from the PWD.  I hope that is right.
+fi
 
 pdfbase=$(basename $histfile .hadded.root)
 
@@ -48,5 +62,5 @@ fi
 
 root -n -l -b -q $(dirname $0)/ligopass2.C+\
 '("'"$histfile"'","'"$trigname"'","'"$pdfbase"'",'\
-$livetimediv', '$longreadout', '$nwindows')' \
+$livetimediv', '$longreadout', '$nwindows', "'$(dirname $0)/$gwname.bg'")' \
  | tee $pdfbase.log
