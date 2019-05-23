@@ -23,7 +23,7 @@ else
   echo I got gwname = $gwname from the PWD.  I hope that is right.
 fi
 
-pdfbase=$(basename $histfile .hadded.root)
+pdfbase=$(dirname $histfile)/$(basename $histfile .hadded.root)
 
 # If name has the form NNNx-streamname.hadded.root, it's a background
 # sample, and NNN is the number of windows.  Otherwise, it's a signal file.
