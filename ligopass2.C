@@ -28,6 +28,10 @@ const unsigned int NHIST = 52;
 // the background is for other jobs)
 bool gextexp = true;
 
+bool is_ddactivity1 = false,
+     is_fdminbias = false,
+     is_ndminbias = false;
+
 enum stream_t {
   fardet_t02 = 0x01, neardet_ddactivity1 = 0x02, fardet_ddenergy = 0x04,
   neardet_long = 0x08, fardet_long = 0x10,
@@ -35,7 +39,11 @@ enum stream_t {
 };
 
 struct popts{
+  // Name to display on histograms and print in log
   const char * name;
+
+  // Name to print in log and use for background lookup
+  const char * codename;
 
   // What order polynominal to fit the background time series to
   unsigned int polyorder;
@@ -50,11 +58,12 @@ struct popts{
   // Slope of background if the background is time varying
   double extexp1;
 
-  popts(const char * const name_, const unsigned int polyorder_,
-        const bool stattest_, const double extexp_ = 0,
-        const double extexp1_ = 0)
+  popts(const char * const name_, const char * const codename_,
+        const unsigned int polyorder_, const bool stattest_,
+        const double extexp_ = 0, const double extexp1_ = 0)
   {
     name = name_;
+    codename = codename_;
     polyorder = polyorder_;
     stattest = stattest_;
 
@@ -857,7 +866,13 @@ void process_rebin(TH1D *hist, TH1D * histlive,
 
 void process(TH1D * hist, TH1D * histlive, const popts opts)
 {
-  printf("\n%s:\n", opts.name);
+  if(strlen(opts.codename) > 0)
+    printf("\n%s (%s_%s):\n", opts.name, opts.codename,
+           is_ddactivity1?"DDACTIVITY1":
+           is_fdminbias?  "FDMINBIAS":
+           is_ndminbias?  "": "?");
+  else
+    printf("\n%s:\n", opts.name);
   process_rebin(hist, histlive,  1, opts);
 #if 0
   if(!longreadout) process_rebin(hist, histlive, 10, opts);
@@ -952,9 +967,9 @@ void ligopass2(const char * const infilename_, const char * trigname_,
   stylecanvas(&USN);
   printstart();
 
-  const bool is_ddactivity1 = stream == neardet_ddactivity1,
-             is_fdminbias = (stream & fardet_minbias),
-             is_ndminbias = stream == neardet_long;
+  is_ddactivity1 = stream == neardet_ddactivity1,
+  is_fdminbias = (stream & fardet_minbias),
+  is_ndminbias = stream == neardet_long;
 
   if(DOIT("blind", popts("Livetime report only", 0, true, 0))){
     printend();
@@ -962,10 +977,10 @@ void ligopass2(const char * const infilename_, const char * trigname_,
   }
 
   DOIT("supernovalike",
-       popts("Supernova-like events", 0, true, is_ndminbias? 0.53: 0));
+       popts("Supernova-like events", "", 0, true, is_ndminbias? 0.53: 0));
 
-  DOIT("unslicedbighits", popts("Unsliced big hits", 0, trigname[0] == 'N'));
-  DOIT("unslicedhits",    popts("Unsliced hits",     0, trigname[0] == 'N'));
+  DOIT("unslicedbighits", popts("Unsliced big hits", "", 0, trigname[0] == 'N'));
+  DOIT("unslicedhits",    popts("Unsliced hits", "",     0, trigname[0] == 'N'));
 
   // Skip rest, since it's redundant w/ 100% efficient ddactivity1.
   if(stream == neardet_long){
@@ -973,29 +988,29 @@ void ligopass2(const char * const infilename_, const char * trigname_,
     return;
   }
 
-  DOIT("tracks", popts("Slices with tracks", 0, true));
+  DOIT("tracks", popts("Slices with tracks", "", 0, true));
 
-  DOIT("tracks_point_1", popts("Slices w/ tracks, 16#circ", 1, true));
+  DOIT("tracks_point_1", popts("Slices w/ tracks, 16#circ", "", 1, true));
 
   std::map<std::string, double> extbg = readbg(bgfile);
 
   DOIT("tracks_point_0",
-    popts("Slices w/ tracks, 1.3#circ",1, true,
+    popts("Slices w/ tracks, 1.3#circ", "TRACKS_POINT_0", 1, true,
           is_ddactivity1? extbg.at("TRACKS_POINT_0_DDACTIVITY1_P0"): 0,
           is_ddactivity1? extbg.at("TRACKS_POINT_0_DDACTIVITY1_P1"): 0));
 
   DOIT("halfcontained_tracks",
-       popts("Stopping tracks", 0, true,
+       popts("Stopping tracks", "", 0, true,
              is_ddactivity1? 0.401: 0));
 
   DOIT("halfcontained_tracks_point_1",
-    popts("Stopping tracks, 16#circ", 1, true,
+    popts("Stopping tracks, 16#circ", "HALFCONTAINED_TRACKS_POINT_1", 1, true,
     is_ddactivity1?extbg.at("HALFCONTAINED_TRACKS_POINT_1_DDACTIVITY1_P0"): 0,
     is_ddactivity1?extbg.at("HALFCONTAINED_TRACKS_POINT_1_DDACTIVITY1_P1"): 0)
     );
 
   DOIT("halfcontained_tracks_point_0",
-    popts("Stopping tracks, 1.3#circ", 1, true,
+    popts("Stopping tracks, 1.3#circ", "HALFCONTAINED_TRACKS_POINT_0", 1, true,
     is_ddactivity1? extbg.at("HALFCONTAINED_TRACKS_POINT_0_DDACTIVITY1_P0"):
     is_fdminbias?   extbg.at("HALFCONTAINED_TRACKS_POINT_0_FDMINBIAS_P0"): 0,
     is_ddactivity1? extbg.at("HALFCONTAINED_TRACKS_POINT_0_DDACTIVITY1_P1"):
@@ -1003,12 +1018,12 @@ void ligopass2(const char * const infilename_, const char * trigname_,
     );
 
   DOIT("fullycontained_tracks",
-       popts("Contained tracks", 0, true,
+       popts("Contained tracks", "", 0, true,
              is_ddactivity1? 2.8e-5:
              is_fdminbias? 0.45: 0));
 
   DOIT("fullycontained_tracks_point_1",
-    popts("Contained tracks, 16#circ", 1, true,
+    popts("Contained tracks, 16#circ", "FULLYCONTAINED_TRACKS_POINT_1", 1, true,
     is_ddactivity1? extbg.at("FULLYCONTAINED_TRACKS_POINT_1_DDACTIVITY1_P0"):
     is_fdminbias?   extbg.at("FULLYCONTAINED_TRACKS_POINT_1_FDMINBIAS_P0"): 0,
     is_ddactivity1? extbg.at("FULLYCONTAINED_TRACKS_POINT_1_DDACTIVITY1_P1"):
@@ -1016,7 +1031,7 @@ void ligopass2(const char * const infilename_, const char * trigname_,
     );
 
   DOIT("fullycontained_tracks_point_0",
-    popts("Contained tracks, 1.3#circ",1, true,
+    popts("Contained tracks, 1.3#circ", "FULLYCONTAINED_TRACKS_POINT_0",1, true,
     is_ddactivity1? extbg.at("FULLYCONTAINED_TRACKS_POINT_0_DDACTIVITY1_P0"):
     is_fdminbias?   extbg.at("FULLYCONTAINED_TRACKS_POINT_0_FDMINBIAS_P0"): 0,
     is_ddactivity1? extbg.at("FULLYCONTAINED_TRACKS_POINT_0_DDACTIVITY1_P1"):
@@ -1024,38 +1039,38 @@ void ligopass2(const char * const infilename_, const char * trigname_,
     );
 
   DOIT("contained_slices",
-       popts("Contained slices", 0, true,
+       popts("Contained slices", "", 0, true,
              is_ddactivity1? 0.00093:
              is_fdminbias? 24.085: 0));
 
   DOIT("upmu_tracks",
-       popts("Upward going muons", 0, true,
+       popts("Upward going muons", "", 0, true,
              is_fdminbias? 1.98: 0));
 
   DOIT("upmu_tracks_point_1",
-       popts("Up-#mu, 16#circ", 1, true,
+       popts("Up-#mu, 16#circ", "UPMU_TRACKS_POINT_1", 1, true,
              is_fdminbias? extbg.at("UPMU_TRACKS_POINT_1_FDMINBIAS_P0"): 0,
              is_fdminbias? extbg.at("UPMU_TRACKS_POINT_1_FDMINBIAS_P1"): 0));
 
   DOIT("upmu_tracks_point_0",
-       popts("Up-#mu, 1.3#circ", 1, true,
+       popts("Up-#mu, 1.3#circ", "UPMU_TRACKS_POINT_0", 1, true,
              is_fdminbias? extbg.at("UPMU_TRACKS_POINT_0_FDMINBIAS_P0"): 0,
              is_fdminbias? extbg.at("UPMU_TRACKS_POINT_0_FDMINBIAS_P1"): 0));
 
   DOIT("rawtrigger",
-       popts("Raw triggers",         0, true));
+       popts("Raw triggers", "",         0, true));
   DOIT("energy_low_cut",
-       popts(">5M ADC total",        0, true));
+       popts(">5M ADC total", "",        0, true));
   DOIT("energy_low_cut_pertime",
-       popts(">2.5M ADC per 50#mus", 0, true));
+       popts(">2.5M ADC per 50#mus", "", 0, true));
   DOIT("energy_high_cut",
-       popts(">50M ADC total",       0, true, 0.0010));
+       popts(">50M ADC total", "",       0, true, 0.0010));
   DOIT("energy_high_cut_pertime",
-       popts(">25M ADC per 50#mus",  0, true, 0.0021));
+       popts(">25M ADC per 50#mus", "",  0, true, 0.0021));
   DOIT("energy_vhigh_cut",
-      popts(">500M ADC total",      0, true, 1e-100));
+      popts(">500M ADC total", "",      0, true, 1e-100));
   DOIT("energy_vhigh_cut_pertime",
-       popts(">250M ADC per 50#mus", 0, true, 1e-100));
+       popts(">250M ADC per 50#mus", "", 0, true, 1e-100));
 
   printend();
 }

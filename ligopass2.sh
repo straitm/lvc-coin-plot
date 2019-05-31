@@ -16,6 +16,7 @@ if [ $2 ]; then
   gwname=$2
 elif [ "$(dirname "$histfile")" != . ]; then
   gwname=$(basename "$(dirname "$histfile")")
+  gwname=${gwname##*-}
   echo I got gwname = $gwname from the full path.  I hope that is right.
 else
   gwname=$(basename "$PWD")
