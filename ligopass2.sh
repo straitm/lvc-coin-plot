@@ -64,4 +64,4 @@ fi
 root -n -l -b -q $(dirname $0)/ligopass2.C+\
 '("'"$histfile"'","'"$trigname"'","'"$pdfbase"'",'\
 $livetimediv', '$longreadout', '$nwindows', "'$(dirname $0)/$gwname.bg'")' \
- | tee $pdfbase.log
+ 2> /dev/stdout | tee $pdfbase.log

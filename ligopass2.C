@@ -925,6 +925,7 @@ std::map<std::string, double> readbg(const char * const bgfile)
   double value;
   std::map<std::string, double> extbg;
   while(infile >> key >> value) extbg[key] = value;
+  printf("Read in %u external background numbers\n", (unsigned int)extbg.size());
   return extbg;
 }
 
