@@ -18,7 +18,7 @@
 #include <fstream>
 
 //#define DEBUG
-//#define SEPARATEPDFS
+#define SEPARATEPDFS
 
 // The total number of histograms searched for
 const unsigned int NHIST = 52;
@@ -749,21 +749,20 @@ void process_rebin(TH1D *hist, TH1D * histlive,
   if(preliminary) novapreliminary();
   randomtime();
 
-  double mint = 0, maxt = 0;
+  double mint = -500, maxt = 500;
 
-  if(longreadout && rebin == 1){
+  if(longreadout && rebin == 1)
     mint = -10, maxt = 45;
-    rebinned->GetXaxis()->SetRangeUser(mint, maxt);
-    if(rebinnedlive != NULL)
-      rebinnedlive->GetXaxis()->SetRangeUser(mint, maxt);
-  }
 
+  rebinned->GetXaxis()->SetRangeUser(mint, maxt);
+  if(rebinnedlive != NULL)
+    rebinnedlive->GetXaxis()->SetRangeUser(mint, maxt);
 
   TH1D * divided
     = dividebylivetime?divide_livetime(rebinned, rebinnedlive):rebinned;
   if(dividebylivetime){
     if(rebin == 1){
-       divided->GetXaxis()->SetRangeUser(mint, maxt);
+      divided->GetXaxis()->SetRangeUser(mint, maxt);
 
       double miny = divided->GetMaximum();
       double maxy = divided->GetMaximum();
@@ -852,12 +851,12 @@ void process_rebin(TH1D *hist, TH1D * histlive,
     const int bestbin =
       bumphunt(hist, histlive, rebin, opts.extexp, opts.extexp1,
                std::min((unsigned int)(hist->Integral()), opts.polyorder));
-    TPad * p = dividebylivetime? toppad: &USN;
+    TPad * p = dividebylivetime? midpad: &USN;
     if(bestbin > 0){
       p->cd();
-      styledrawellipse(new TEllipse(divided->GetBinCenter(bestbin),
-                                    divided->GetBinContent(bestbin),
-        longreadout?0.55:10, (p->GetUymax() - p->GetUymin())/30));
+      styledrawellipse(new TEllipse(hist->GetBinCenter(bestbin),
+                                    hist->GetBinContent(bestbin),
+        (maxt-mint)/50, (p->GetUymax() - p->GetUymin())/20));
     }
   }
 
