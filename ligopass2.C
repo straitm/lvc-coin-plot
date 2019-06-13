@@ -527,7 +527,7 @@ int bumphunt(TH1D * hist, TH1D * histlive, const int rebin,
   const double globprob = lookelse(localprob, NHIST*hist->GetNbinsX());
 
   if(globprob < 0.5)
-    printf("Highest: {%d, %d}s: %d, %.3f exp. P hist: %.2g (%.2g global)\n",
+    printf("Highest: {%d, %d}s: %d, %.3f exp. P hist: %.2g (%.3g global)\n",
            (int)hist->GetBinLowEdge(minprob_bin),
            (int)hist->GetBinLowEdge(minprob_bin+1),
            actual, expected, histprob, globprob);
@@ -563,7 +563,7 @@ int bumphunt(TH1D * hist, TH1D * histlive, const int rebin,
     const double shistprob = lookelse(localprob, specialbins);
     const double sglobprob     = lookelse(localprob, NHIST*specialbins);
     if(sglobprob < 0.5)
-      printf("This was in first %ds. P: %.2g (%.2g global)\n",
+      printf("This was in first %ds. P: %.2g (%.3g global)\n",
              specialbins, shistprob, sglobprob);
     sigmacheck(sglobprob, expected);
   }
@@ -700,7 +700,7 @@ void bumphunt_nonpoisson(TH1D * h)
 
     if(sigmacheck(globprob, mean)){
       printf("{%d, %d} %f with %f expected\n"
-             "P = %.1g local, %.1g in hist, %.1g global\n",
+             "P = %.1g local, %.1g in hist, %.3g global\n",
          (int)h->GetBinLowEdge(i), (int)h->GetBinLowEdge(i+1),
          content, mean,
          localprob, histprob, globprob);
