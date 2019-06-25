@@ -6,8 +6,8 @@ for e in GW170809 GW170814 GW170818 GW170823 S190412m S190421ar S190425z \
     ../ligosidebandresults-$e/*-fardet-t02.hadded.root
 done
 
-for e in GW150914 GW151012 GW151226 GW170104 GW170608 GW170729 GW170809 \
-         GW170814 GW170817 GW170818 S190421ar S190426c S190513bm S190521g S190521r; do
+for e in GW150914 GW151226 GW170104 GW170608 GW170729 GW170809 \
+         GW170814 GW170818 S190421ar S190426c S190513bm S190521g S190521r; do
   ./tricia.sh ../ligobgresults-$e/neardet-ddactivity.list \
     ../ligosidebandresults-$e/*-neardet-ddactivity1.hadded.root
 done

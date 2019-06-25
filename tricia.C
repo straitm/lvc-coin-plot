@@ -25,6 +25,8 @@
 #include "TEllipse.h"
 #include <fstream>
 
+#define SEPARATEPDFS
+
 const double textsize = 0.06;
 
 TCanvas bitwash;
@@ -32,7 +34,10 @@ const char * outbase = NULL;
 
 void printstart()
 {
-  bitwash.Print(Form("%s.pdf[", outbase));
+  static bool started = false;
+  if(!started)
+    bitwash.Print(Form("%s.pdf[", outbase));
+  started = true;
 }
 
 void printend()
@@ -114,6 +119,7 @@ void Add(TH1D & hist, const char * const filename,
   }
 
   TH1D * inhist = dynamic_cast<TH1D*>(ligodir->Get(histname));
+  inhist->Sumw2();
   if(inhist == NULL){
     fprintf(stderr, "No histogram named %s in %s\n", histname, filename);
     exit(1);
@@ -157,6 +163,16 @@ opts mkopts(string histname_, int nbins_, double low_, double high_, string xtit
   return o;
 }
 
+double minz(TH1D * h)
+{
+  double ans = 1e300;
+  for(int i = 1; i < h->GetNbinsX(); i++){
+    const double b = h->GetBinContent(i);
+    if(b > 0 && b < ans) ans = b;
+  }
+  return ans;
+}
+
 void tricia(const std::string & bgfilelistfile,
             const std::string & infilename,
             const std::string & trigname,
@@ -170,7 +186,7 @@ void tricia(const std::string & bgfilelistfile,
 
   vector<opts> todolist;
   if(trigname == "FD 10Hz trigger"){
-    todolist.push_back(mkopts("halfcontained_tracks_point_0", 20, 0, 20,
+    todolist.push_back(mkopts("halfcontained_tracks_point_0", 100, 0, 100,
                               "FD 10Hz, Stopping tracks, 1.3#circ, raw/s"));
     todolist.push_back(mkopts("fullycontained_tracks", 20, 0, 20,
                               "FD 10Hz, Contained tracks, raw/s"));
@@ -206,18 +222,18 @@ void tricia(const std::string & bgfilelistfile,
                               "ND energy, Contained slices, raw/s"));
   }
   else if(trigname == "FD energy"){
-    todolist.push_back(mkopts("energy_vhigh_cut", 20, 0, 20,
-                              "FD energy, >500 ADC total/s"));
-    todolist.push_back(mkopts("energy_low_cut_pertime", 20, 0, 20,
+    todolist.push_back(mkopts("energy_high_cut", 20, 0, 20,
                               "FD energy, >2.5 ADC total/50#mus/s"));
     todolist.push_back(mkopts("energy_high_cut_pertime", 20, 0, 20,
                               "FD energy, >25 ADC total/50#mus/s"));
+    todolist.push_back(mkopts("energy_vhigh_cut", 20, 0, 20,
+                              "FD energy, >500 ADC total/s"));
     todolist.push_back(mkopts("energy_vhigh_cut_pertime", 20, 0, 20,
                               "FD energy, >250 ADC total/50#mus/s"));
   }
 
-  printstart();
-
+  bitwash.SetLogy();
+  
   for(unsigned int i = 0; i < todolist.size(); i++){
     opts & o = todolist[i];
 
@@ -237,6 +253,8 @@ void tricia(const std::string & bgfilelistfile,
     while(bglist >> bgfilename)
       Add(*bg, bgfilename.c_str(), o.histname.c_str(), livetimediv);
 
+    printstart();
+
     sig->SetLineColor(kBlack);
     bg->SetLineColor(kRed);
 
@@ -245,17 +263,34 @@ void tricia(const std::string & bgfilelistfile,
     sig->GetXaxis()->SetTitle(o.xtitle.c_str());
     sig->GetYaxis()->SetTitle("Fraction of bins");
 
-    if(sig->Integral()) sig->DrawNormalized("e");
-    else                sig->Draw("e");
-    if(bg->Integral()) bg->DrawNormalized("sameehist");
-    else               bg->Draw("sameehist");
+    if(bg->Integral()) bg->Scale(1/bg->Integral());
+    if(sig->Integral()) sig->Scale(1/sig->Integral());
+
+    const double ks = 100*sig->KolmogorovTest(bg);
+    const double chi2 = 100*sig->Chi2Test(bg, "uw");
+
+    sig->Draw("e");
+    bg->Draw("sameehist");
+
+    const double mn = minz(bg)*0.7,
+                 mx = sig->GetMaximum()*1.3;
+    if(mx > mn) sig->GetYaxis()->SetRangeUser(mn, mx);
 
     TLatex * l = new TLatex(0, 0, "");
     l->SetTextSize(textsize);
     l->SetTextFont(42);
-    if(sig->GetEntries())
-      l->DrawLatexNDC(0.6, 0.8,
-        Form("KS %.1f%%", 100*sig->KolmogorovTest(bg)));
+    if(sig->GetEntries()){
+      if(bg->Integral() == bg->GetBinContent(1) &&
+        sig->Integral() == sig->GetBinContent(1)){
+        l->DrawLatexNDC(0.3, 0.8, "No signal or background");
+      }
+      else{
+        l->SetTextColor(ks < 5?kRed:kBlack);
+        l->DrawLatexNDC(0.6, 0.8, Form("KS %.1f%%", ks));
+        l->SetTextColor(chi2 < 5?kRed:kBlack);
+        l->DrawLatexNDC(0.6, 0.7, Form("#chi^{2} %.1f%%", chi2));
+      }
+    }
    
     TLatex * l2 = new TLatex(0, 0, "");
     l2->SetTextSize(textsize);
