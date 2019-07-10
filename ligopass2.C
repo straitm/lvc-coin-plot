@@ -863,7 +863,7 @@ void process_rebin(TH1D *hist, TH1D * histlive,
   print2(Form("%s-%ds", hist->GetName(), rebin));
 }
 
-void process(TH1D * hist, TH1D * histlive, const popts opts)
+void process(TH1D * hist, TH1D * histlive, const popts & opts)
 {
   if(strlen(opts.codename) > 0)
     printf("\n%s (%s_%s):\n", opts.name, opts.codename,
@@ -956,8 +956,6 @@ void ligopass2(const char * const infilename_, const char * trigname_,
   gErrorIgnoreLevel = kWarning; // Don't print about making PDFs
 
   ligodir = dynamic_cast<TDirectory*>(ligofile->Get("ligoanalysis"));
-  if(ligodir == NULL)
-    ligodir = dynamic_cast<TDirectory*>(ligofile->Get("ligo"));
 
   if(ligodir == NULL){
     fprintf(stderr, "No \"ligoanalysis\" directory in this file\n");
@@ -971,7 +969,7 @@ void ligopass2(const char * const infilename_, const char * trigname_,
   is_fdminbias = (stream & fardet_minbias),
   is_ndminbias = stream == neardet_long;
 
-  if(DOIT("blind", popts("Livetime report only", 0, true, 0))){
+  if(DOIT("blind", popts("Livetime report only", "", 0, true))){
     printend();
     return; // Make double-sure we stay blind if this is a blind report
   }
