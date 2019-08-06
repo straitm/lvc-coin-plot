@@ -18,7 +18,7 @@
 #include <fstream>
 
 //#define DEBUG
-#define SEPARATEPDFS
+//#define SEPARATEPDFS
 
 // The total number of histograms searched for
 const unsigned int NHIST = 52;
@@ -441,7 +441,7 @@ void stylefitraw(TH1D * fitraw, const bool externalexpectation)
 // excess, or -1 if none has an interesting excess
 int bumphunt(TH1D * hist, TH1D * histlive, const int rebin,
              const double extexp, const double extexp1,
-             unsigned int polyorder)
+             unsigned int polyorder, const char * codename)
 {
   if(histlive == NULL || !dividebylivetime)
     histlive = dummy_histlive(hist, rebin);
@@ -545,11 +545,13 @@ int bumphunt(TH1D * hist, TH1D * histlive, const int rebin,
              "                +- %-6.3g\n", mean, error);
     }
     else if(polyorder == 1){
-      printf("Fit: (%-6.3g\n"
-             "   +- %-6.3g) + (%-6.3g\n"
+      printf("Fit: (\n%s_%s_P0 %-6.3g\n"
+             "   +- %-6.3g) + (\n%s_%s_P1 %-6.3g\n"
              "                 +- %-6.3g)t\n",
+             codename, is_ddactivity1?"DDACTIVITY1":is_fdminbias?"FDMINBIAS":"?",
              poly->GetParameter(0)/(dividebylivetime?1:nwindows),
              poly->GetParError(0)/(dividebylivetime?1:nwindows),
+             codename,is_ddactivity1?"DDACTIVITY1":is_fdminbias?"FDMINBIAS":"?",
              poly->GetParameter(1)/(dividebylivetime?1:nwindows),
              poly->GetParError(1)/(dividebylivetime?1:nwindows));
     }
@@ -842,7 +844,15 @@ void process_rebin(TH1D *hist, TH1D * histlive,
   (dividebylivetime?toppad:&USN)->SetLogy(opts.extexp > 0);
 
   if(hist->Integral() == 0){
-    if(rebin == 1) printf("No events, so there's no excess\n");
+    if(rebin == 1){
+      printf("No events, so there's no excess\n");
+      if(opts.polyorder == 1){
+        printf("%s_%s_P0 1e-100\n"
+               "%s_%s_P1 1e-100\n",
+          opts.codename, is_ddactivity1?"DDACTIVITY1":is_fdminbias?"FDMINBIAS":"?",
+          opts.codename, is_ddactivity1?"DDACTIVITY1":is_fdminbias?"FDMINBIAS":"?");
+      }
+    }
   }
   else if(!opts.stattest){
     bumphunt_nonpoisson(divided);
@@ -850,7 +860,8 @@ void process_rebin(TH1D *hist, TH1D * histlive,
   else{
     const int bestbin =
       bumphunt(hist, histlive, rebin, opts.extexp, opts.extexp1,
-               std::min((unsigned int)(hist->Integral()), opts.polyorder));
+               std::min((unsigned int)(hist->Integral()), opts.polyorder),
+               opts.codename);
     TPad * p = dividebylivetime? midpad: &USN;
     if(bestbin > 0){
       p->cd();
@@ -917,14 +928,15 @@ std::map<std::string, double> readbg(const char * const bgfile)
 {
   std::ifstream infile(bgfile);
   if(!infile.is_open()){
-    fprintf(stderr, "Could not open %s\n", bgfile);
+    printf("Could not open %s\n", bgfile);
     exit(1);
   }
   std::string key;
   double value;
   std::map<std::string, double> extbg;
   while(infile >> key >> value) extbg[key] = value;
-  printf("Read in %u external background numbers\n", (unsigned int)extbg.size());
+  printf("Read in %u external background numbers from %s\n",
+    (unsigned int)extbg.size(), bgfile);
   return extbg;
 }
 

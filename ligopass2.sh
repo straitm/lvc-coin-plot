@@ -30,8 +30,10 @@ pdfbase=$(dirname $histfile)/$(basename $histfile .hadded.root)
 # sample, and NNN is the number of windows.  Otherwise, it's a signal file.
 if echo $histfile | grep -q x; then
   nwindows=$(echo $histfile | cut -dx -f 1)
+  bgfile=dummy.bg
 else
   nwindows=1
+  bgfile=${gwname}.bg
 fi
 
 if echo $histfile | grep -q fardet-t02; then
@@ -63,5 +65,5 @@ fi
 
 root -n -l -b -q $(dirname $0)/ligopass2.C+\
 '("'"$histfile"'","'"$trigname"'","'"$pdfbase"'",'\
-$livetimediv', '$longreadout', '$nwindows', "'$(dirname $0)/$gwname.bg'")' \
+$livetimediv', '$longreadout', '$nwindows', "'$(dirname $0)/$bgfile'")' \
  2> /dev/stdout | tee $pdfbase.log

@@ -287,8 +287,8 @@ void tricia(const std::string & bgfilelistfile,
       else{
         l->SetTextColor(ks < 5?kRed:kBlack);
         l->DrawLatexNDC(0.6, 0.8, Form("KS %.1f%%", ks));
-        l->SetTextColor(chi2 < 5?kRed:kBlack);
-        l->DrawLatexNDC(0.6, 0.7, Form("#chi^{2} %.1f%%", chi2));
+        //l->SetTextColor(chi2 < 5?kRed:kBlack);
+        //l->DrawLatexNDC(0.6, 0.7, Form("#chi^{2} %.1f%%", chi2));
       }
     }
    

@@ -1,10 +1,26 @@
 #!/bin/bash
 
-for e in GW170809 GW170814 GW170818 GW170823 S190412m S190421ar S190425z \
-         S190426c S190503bf S190512at S190513bm S190521g S190521r; do 
+for e in GW150914 GW151226 GW170104 GW170608 GW170729 GW170809 GW170814 \
+         GW170817 GW170818 GW170823 S190412m S190421ar S190425z S190426c \
+         S190503bf S190510g S190512at S190513bm S190517h S190519bj S190521g \
+         S190521r; do 
+  if ! [ -e ../ligobgresults-$e/fardet-t02.list ]; then
+    echo ../ligobgresults-$e/fardet-t02.list does not exist, skipping
+    continue
+  fi
+
+  if ! [ -e  ../ligosidebandresults-$e/*-fardet-t02.hadded.root ]; then
+    echo ../ligosidebandresults-$e/*-fardet-t02.hadded.root does not exist, skipping
+    continue
+  fi
+
   ./tricia.sh ../ligobgresults-$e/fardet-t02.list \
     ../ligosidebandresults-$e/*-fardet-t02.hadded.root
 done
+
+# note
+exit 0
+
 
 for e in GW150914 GW151226 GW170104 GW170608 GW170729 GW170809 \
          GW170814 GW170818 S190421ar S190426c S190513bm S190521g S190521r; do
