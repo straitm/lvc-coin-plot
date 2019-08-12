@@ -18,7 +18,7 @@
 #include <fstream>
 
 //#define DEBUG
-//#define SEPARATEPDFS
+#define SEPARATEPDFS
 
 // The total number of histograms searched for
 const unsigned int NHIST = 52;
@@ -346,15 +346,15 @@ double lookelse(const double localprob, const int trials)
 // don't really know what sigma is.
 bool sigmacheck(const double p, const double expected)
 {
-  const unsigned int nlev = 3;
-  const double lev[nlev] = { 5, 3, 2 };
+  const unsigned int nlev = 4;
+  const double lev[nlev] = { 5, 3, 2, 1 };
 
   for(unsigned int i = 0; i < nlev; i++)
     if(p < (1-ROOT::Math::gaussian_cdf(lev[i], 1))*2){
       if(expected > 1e-50){
         printf("*******************************************\n"
                "*******************************************\n"
-               "*******  That's more than %.0f sigma   *******\n"
+               "*******  That's more than %.1f sigma   *******\n"
                "*******************************************\n"
                "*******************************************\n", lev[i]);
         return true;
@@ -526,7 +526,7 @@ int bumphunt(TH1D * hist, TH1D * histlive, const int rebin,
   const double histprob = lookelse(localprob, hist->GetNbinsX());
   const double globprob = lookelse(localprob, NHIST*hist->GetNbinsX());
 
-  if(globprob < 0.5)
+  //if(globprob < 0.5)
     printf("Highest: {%d, %d}s: %d, %.3f exp. P hist: %.2g (%.3g global)\n",
            (int)hist->GetBinLowEdge(minprob_bin),
            (int)hist->GetBinLowEdge(minprob_bin+1),
@@ -562,11 +562,11 @@ int bumphunt(TH1D * hist, TH1D * histlive, const int rebin,
   const int specialbin1 = hist->GetXaxis()->FindBin(0.5);
   if(minprob_bin >= specialbin1 && minprob_bin < specialbin1+specialbins){
     const double slocalprob = prob_this_or_more(actual, expected);
-    const double shistprob = lookelse(localprob, specialbins);
-    const double sglobprob     = lookelse(localprob, NHIST*specialbins);
-    if(sglobprob < 0.5)
-      printf("This was in first %ds. P: %.2g (%.3g global)\n",
-             specialbins, shistprob, sglobprob);
+    const double shistprob = lookelse(slocalprob, specialbins);
+    const double sglobprob = lookelse(slocalprob, NHIST*specialbins);
+    //if(sglobprob < 0.5)
+      printf("This was in first %ds. P: %.2g (%.2g hist) (%.3g global)\n",
+             specialbins, slocalprob, shistprob, sglobprob);
     sigmacheck(sglobprob, expected);
   }
 
