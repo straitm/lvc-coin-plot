@@ -595,8 +595,10 @@ void novapreliminary()
   t->SetTextFont(42);
   t->SetNDC();
   t->SetTextAlign(32);
-  t->SetX(1 - rightmargin - 0.02);
-  t->SetY(1 -  topmargin  + 0.01 - (!dividebylivetime)*0.085);
+  const double raise = dividebylivetime? 0.08:-0.085;
+  const double shift = dividebylivetime? 0.02:0.00;
+  t->SetX(1 - rightmargin - 0.02 + shift);
+  t->SetY(1 -  topmargin  + 0.01 + raise);
   t->Draw();
 }
 
