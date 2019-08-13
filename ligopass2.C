@@ -527,7 +527,7 @@ int bumphunt(TH1D * hist, TH1D * histlive, const int rebin,
   const double globprob = lookelse(localprob, NHIST*hist->GetNbinsX());
 
   //if(globprob < 0.5)
-    printf("Highest: {%d, %d}s: %d, %.3f exp. P hist: %.2g (%.3g global)\n",
+    printf("Highest: {%d, %d}s: %d, %.4f exp. P hist: %.2g (%.3g global)\n",
            (int)hist->GetBinLowEdge(minprob_bin),
            (int)hist->GetBinLowEdge(minprob_bin+1),
            actual, expected, histprob, globprob);
