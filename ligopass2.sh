@@ -41,11 +41,11 @@ if echo $histfile | grep -q fardet-t02; then
   livetimediv=1
   longreadout=0
 elif echo $histfile | grep -q neardet-ddactivity1; then
-  trigname="ND energy"
+  trigname="ND energy trigger"
   livetimediv=0
   longreadout=0
 elif echo $histfile | grep -q fardet-ddenergy; then
-  trigname="FD energy"
+  trigname="FD energy trigger"
   livetimediv=0
   longreadout=0
 elif echo $histfile | grep -q neardet-ddsnews ||
@@ -65,5 +65,5 @@ fi
 
 root -n -l -b -q $(dirname $0)/ligopass2.C+\
 '("'"$histfile"'","'"$trigname"'","'"$pdfbase"'",'\
-$livetimediv', '$longreadout', '$nwindows', "'$(dirname $0)/$bgfile'")' \
+$livetimediv', '$longreadout', '$nwindows', "'$(dirname $0)/$bgfile'", "'$gwname'")' \
  2> /dev/stdout | tee $pdfbase.log

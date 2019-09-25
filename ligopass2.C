@@ -79,7 +79,7 @@ struct popts{
 };
 
 const double textsize = 0.07;
-const double topmargin = 0.11 * textsize/0.07;
+const double topmargin = 0.08 * textsize/0.07;
 
 bool dividebylivetime = false;
 bool longreadout = false;
@@ -91,6 +91,7 @@ int nwindows = 1;
 const char * outbase = NULL;
 const char * trigname = NULL;
 const char * infilename = NULL;
+const char * gwname = NULL;
 
 TCanvas USN;
 TPad * botpad, * midpad, * toppad;
@@ -234,10 +235,10 @@ void stylecanvas(TCanvas * c)
     midpad->Draw();
   }
   else{
-    c->SetBottomMargin(0.143);
+    c->SetBottomMargin(0.150);
     c->SetLeftMargin(0.175);
     c->SetRightMargin(0.02);
-    c->SetTopMargin(0.12);
+    c->SetTopMargin(0.125);
     c->SetTickx(1);
     c->SetTicky(1);
   }
@@ -354,17 +355,17 @@ bool sigmacheck(const double p, const double expected)
       if(expected > 1e-50){
         printf("*******************************************\n"
                "*******************************************\n"
-               "*******  That's more than %.1f sigma   *******\n"
+               "******* That's more than %.1f sigma ********\n"
                "*******************************************\n"
                "*******************************************\n", lev[i]);
         return true;
       }
       else{
-        printf("*******************************************\n"
-               "*******************************************\n"
-               "*******  Need a better background est! *******\n"
-               "*******************************************\n"
-               "*******************************************\n");
+        printf("********************************************\n"
+               "********************************************\n"
+               "* inf sigma. Need a better background est! *\n"
+               "********************************************\n"
+               "********************************************\n");
         return false;
       }
     }
@@ -726,24 +727,32 @@ void process_rebin(TH1D *hist, TH1D * histlive,
 
   stylehist(rebinned, 0);
 
-  const bool preliminary = true;
+  const bool setlogy = opts.extexp > 1 || !dividebylivetime;
+
+  const bool preliminary = false;
+  const bool usegwname = true;
 
   // Some trickery (static) here needed to avoid getting the first label stuck
   // on all the output PDFs.
   static TLatex * ltitle = new TLatex;
 
-  char title[1024];
-  strncpy(title, infilename, 1024);
-  if(NULL != strstr(title, "Z"))
-    *(strstr(title, "Z")+1) = '\0';
+  char title_event[1024];
+  strncpy(title_event, infilename, 1024);
+  if(NULL != strstr(title_event, "Z"))
+    *(strstr(title_event, "Z")+1) = '\0';
+
+  if(usegwname){
+     strncpy(title_event, gwname, std::min((size_t)1024, strlen(gwname)+1));
+     title_event[1023] = '\0';
+   }
 
   ltitle->SetText(
-    0.16 + leftmargin/2,
-    0.968 - (!dividebylivetime)*0.030,
-    nwindows == 1? Form("#splitline{%s}{%s: %s}", title, trigname, opts.name)
-                 : Form("#splitline{%s}{%s: %s x %d}", title, trigname,
+    dividebylivetime?0.15 + leftmargin/2: 0.16 + leftmargin/2,
+    dividebylivetime?0.98:0.933,
+    nwindows == 1? Form("%s #minus %s: %s", title_event, trigname, opts.name)
+                 : Form("#splitline{%s}{%s: %s x %d}", title_event, trigname,
                         opts.name, nwindows));
-  ltitle->SetTextSize(9./11.*
+  ltitle->SetTextSize((dividebylivetime?9./10.:9./11.)*
                      (dividebylivetime?textsize*textratiofull:textsize));
   ltitle->SetTextFont(42);
   ltitle->SetTextAlign(12);
@@ -769,7 +778,7 @@ void process_rebin(TH1D *hist, TH1D * histlive,
       divided->GetXaxis()->SetRangeUser(mint, maxt);
 
       double miny = divided->GetMaximum();
-      double maxy = divided->GetMaximum();
+      double maxy = -1e100;
       double extramax = 0, extramin = 0;
 
       for(int i = 1; i <= divided->GetNbinsX(); i++){
@@ -786,6 +795,13 @@ void process_rebin(TH1D *hist, TH1D * histlive,
         }
       }
 
+      // Special cases to make particular plots work
+      if(miny - extramin < 350 && miny - extramin > 345) miny += 10;
+      if(miny - extramin < 360 && miny - extramin > 357) miny += 3;
+      if(miny - extramin < 520e3 && miny - extramin > 515e3) miny += 4e3;
+
+      if(!setlogy)
+        divided->GetYaxis()->SetRangeUser(0.001, maxy+extramax);
       if(maxy < 2*miny)
         divided->GetYaxis()->SetRangeUser(miny-extramin, maxy+extramax);
     }
@@ -811,9 +827,12 @@ void process_rebin(TH1D *hist, TH1D * histlive,
     toppad->cd();
     divided->Draw("e");
     toppad->Update(); // Necessary to get Uymin correctly!
-    if(toppad->GetUymin() == 0) divided->GetYaxis()->ChangeLabel(1, -1, 0);
+    if(setlogy && toppad->GetUymin() == 0) divided->GetYaxis()->ChangeLabel(1, -1, 0);
 
     midpad->cd();
+
+    rebinned->GetYaxis()->SetRangeUser(0, rebinned->GetMaximum()*1.1 + sqrt(rebinned->GetMaximum()));
+
     rebinned->Draw("e");
     midpad->Update(); // Necessary to get Uymin correctly!
     if(midpad->GetUymin() == 0) rebinned->GetYaxis()->ChangeLabel(1, -1, 0);
@@ -837,13 +856,15 @@ void process_rebin(TH1D *hist, TH1D * histlive,
     ltitle->Draw();
   }
 
-  if(opts.extexp > 0){
+  // Values like 1e-100 mean we have no background measurement
+  if(setlogy && opts.extexp > 1e-50){
     TH1 * h = dividebylivetime? divided: rebinned;
     h->GetYaxis()->SetTitleOffset(h->GetYaxis()->GetTitleOffset()
                                   *(dividebylivetime? 1: 1.4));
     h->GetYaxis()->SetRangeUser(opts.extexp/2, h->GetMaximum()*8);
   }
-  (dividebylivetime?toppad:&USN)->SetLogy(opts.extexp > 0);
+
+  (dividebylivetime?toppad:&USN)->SetLogy(setlogy);
 
   if(hist->Integral() == 0){
     if(rebin == 1){
@@ -913,11 +934,11 @@ bool DOIT(const char * const hname, const popts & opts)
 enum stream_t decodestream(const char * const trigname)
 {
   enum stream_t stream = UNDEFINED_STREAM;
-  if     (!strcmp(trigname, "FD 10Hz trigger")) stream = fardet_t02;
-  else if(!strcmp(trigname, "ND energy"      )) stream = neardet_ddactivity1;
-  else if(!strcmp(trigname, "FD energy"      )) stream = fardet_ddenergy;
-  else if(!strcmp(trigname, "ND long readout")) stream = neardet_long;
-  else if(!strcmp(trigname, "FD long readout")) stream = fardet_long;
+  if     (!strcmp(trigname, "FD 10Hz trigger"  )) stream = fardet_t02;
+  else if(!strcmp(trigname, "ND energy trigger")) stream = neardet_ddactivity1;
+  else if(!strcmp(trigname, "FD energy trigger")) stream = fardet_ddenergy;
+  else if(!strcmp(trigname, "ND long readout"  )) stream = neardet_long;
+  else if(!strcmp(trigname, "FD long readout"  )) stream = fardet_long;
 
   if(stream == UNDEFINED_STREAM){
     fprintf(stderr, "I don't know what to do with \"%s\"\n", trigname);
@@ -945,13 +966,14 @@ std::map<std::string, double> readbg(const char * const bgfile)
 void ligopass2(const char * const infilename_, const char * trigname_,
                const char * outbase_, const bool dividebylivetime_,
                const bool longreadout_, const int nwindows_,
-               const char * const bgfile)
+               const char * const bgfile, const char * const gwname_)
 {
   infilename = infilename_;
   outbase = outbase_;
   dividebylivetime = dividebylivetime_;
   longreadout = longreadout_;
   trigname = trigname_;
+  gwname = gwname_;
 
   TFile * ligofile = new TFile(infilename, "read");
   if(!ligofile || ligofile->IsZombie()){
@@ -991,8 +1013,8 @@ void ligopass2(const char * const infilename_, const char * trigname_,
   DOIT("supernovalike",
        popts("Supernova-like events", "", 0, true, is_ndminbias? 0.53: 0));
 
-  DOIT("unslicedbighits", popts("Unsliced big hits", "", 0, trigname[0] == 'N'));
-  DOIT("unslicedhits",    popts("Unsliced hits", "",     0, trigname[0] == 'N'));
+  DOIT("unslicedbighits", popts("Sub-supernova, high", "", 0, trigname[0] == 'N'));
+  DOIT("unslicedhits",    popts("Sub-supernova, low", "",     0, trigname[0] == 'N'));
 
   // Skip rest, since it's redundant w/ 100% efficient ddactivity1.
   if(stream == neardet_long){
@@ -1000,14 +1022,14 @@ void ligopass2(const char * const infilename_, const char * trigname_,
     return;
   }
 
-  DOIT("tracks", popts("Slices with tracks", "", 0, true));
+  DOIT("tracks", popts("All tracks", "", 0, true));
 
-  DOIT("tracks_point_1", popts("Slices w/ tracks, 16#circ", "", 1, true));
+  DOIT("tracks_point_1", popts("All tracks, 16#circ", "", 1, true));
 
   std::map<std::string, double> extbg = readbg(bgfile);
 
   DOIT("tracks_point_0",
-    popts("Slices w/ tracks, 1.3#circ", "TRACKS_POINT_0", 1, true,
+    popts("All tracks, 1.3#circ", "TRACKS_POINT_0", 1, true,
           is_ddactivity1? extbg.at("TRACKS_POINT_0_DDACTIVITY1_P0"): 0,
           is_ddactivity1? extbg.at("TRACKS_POINT_0_DDACTIVITY1_P1"): 0));
 
@@ -1051,7 +1073,7 @@ void ligopass2(const char * const infilename_, const char * trigname_,
     );
 
   DOIT("contained_slices",
-       popts("Contained slices", "", 0, true,
+       popts("Contained events", "", 0, true,
              is_ddactivity1? 0.00093:
              is_fdminbias? 24.085: 0));
 
@@ -1060,12 +1082,12 @@ void ligopass2(const char * const infilename_, const char * trigname_,
              is_fdminbias? 1.98: 0));
 
   DOIT("upmu_tracks_point_1",
-       popts("Up-#mu, 16#circ", "UPMU_TRACKS_POINT_1", 1, true,
+       popts("Upward going muons, 16#circ", "UPMU_TRACKS_POINT_1", 1, true,
              is_fdminbias? extbg.at("UPMU_TRACKS_POINT_1_FDMINBIAS_P0"): 0,
              is_fdminbias? extbg.at("UPMU_TRACKS_POINT_1_FDMINBIAS_P1"): 0));
 
   DOIT("upmu_tracks_point_0",
-       popts("Up-#mu, 1.3#circ", "UPMU_TRACKS_POINT_0", 1, true,
+       popts("Upward going muons, 1.3#circ", "UPMU_TRACKS_POINT_0", 1, true,
              is_fdminbias? extbg.at("UPMU_TRACKS_POINT_0_FDMINBIAS_P0"): 0,
              is_fdminbias? extbg.at("UPMU_TRACKS_POINT_0_FDMINBIAS_P1"): 0));
 
