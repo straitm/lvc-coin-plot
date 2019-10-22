@@ -435,6 +435,22 @@ void stylefitraw(TH1D * fitraw, const bool externalexpectation)
   fitraw->SetLineStyle(externalexpectation?9:1);
 }
 
+enum stream_t decodestream(const char * const trigname)
+{
+  enum stream_t stream = UNDEFINED_STREAM;
+  if     (!strcmp(trigname, "FD 10Hz trigger"  )) stream = fardet_t02;
+  else if(!strcmp(trigname, "ND energy trigger")) stream = neardet_ddactivity1;
+  else if(!strcmp(trigname, "FD energy trigger")) stream = fardet_ddenergy;
+  else if(!strcmp(trigname, "ND long readout"  )) stream = neardet_long;
+  else if(!strcmp(trigname, "FD long readout"  )) stream = fardet_long;
+
+  if(stream == UNDEFINED_STREAM){
+    fprintf(stderr, "I don't know what to do with \"%s\"\n", trigname);
+    exit(1);
+  }
+  return stream;
+}
+
 // Look for an excess anywhere in the histogram.  If 'extexp'
 // is positive, use it as the background per second.  Otherwise,
 // fit the histogram using a polnominal of order 'polyorder' and
@@ -523,9 +539,12 @@ int bumphunt(TH1D * hist, TH1D * histlive, const int rebin,
     * histlive->GetBinContent(minprob_bin);
   const int actual = (int)hist->GetBinContent(minprob_bin);
 
+  const enum stream_t stream = decodestream(trigname);
+  const int nbins = (stream == neardet_long || stream == fardet_long)? 45: 1000;
+
   const double localprob = prob_this_or_more(actual, expected);
-  const double histprob = lookelse(localprob, hist->GetNbinsX());
-  const double globprob = lookelse(localprob, NHIST*hist->GetNbinsX());
+  const double histprob = lookelse(localprob, nbins);
+  const double globprob = lookelse(localprob, NHIST*nbins);
 
   //if(globprob < 0.5)
     printf("Highest: {%d, %d}s: %d, %.4f exp. P hist: %.2g (%.3g global)\n",
@@ -929,22 +948,6 @@ bool DOIT(const char * const hname, const popts & opts)
   }
 
   return false;
-}
-
-enum stream_t decodestream(const char * const trigname)
-{
-  enum stream_t stream = UNDEFINED_STREAM;
-  if     (!strcmp(trigname, "FD 10Hz trigger"  )) stream = fardet_t02;
-  else if(!strcmp(trigname, "ND energy trigger")) stream = neardet_ddactivity1;
-  else if(!strcmp(trigname, "FD energy trigger")) stream = fardet_ddenergy;
-  else if(!strcmp(trigname, "ND long readout"  )) stream = neardet_long;
-  else if(!strcmp(trigname, "FD long readout"  )) stream = fardet_long;
-
-  if(stream == UNDEFINED_STREAM){
-    fprintf(stderr, "I don't know what to do with \"%s\"\n", trigname);
-    exit(1);
-  }
-  return stream;
 }
 
 std::map<std::string, double> readbg(const char * const bgfile)
