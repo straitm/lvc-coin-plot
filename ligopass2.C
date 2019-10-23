@@ -79,7 +79,7 @@ struct popts{
 };
 
 const double textsize = 0.07;
-const double topmargin = 0.08 * textsize/0.07;
+const double topmargin = 0.085 * textsize/0.07;
 
 bool dividebylivetime = false;
 bool longreadout = false;
@@ -148,8 +148,10 @@ void stylehist(TH1D * h, const int can /* 0: full, 1: top, 2: mid, 3: bot */)
   TAxis* y = h->GetYaxis();
   TAxis* x = h->GetXaxis();
 
-  h->SetLineColor(kBlack);
-  h->SetMarkerColor(kBlack);
+  const int color = can == 3?kBlue+1: kBlack;
+
+  h->SetLineColor(color);
+  h->SetMarkerColor(color);
 
   if(longreadout || h->GetNbinsX() < 300) h->SetLineWidth(2);
   else                                    h->SetLineWidth(1);
@@ -185,7 +187,7 @@ void stylehist(TH1D * h, const int can /* 0: full, 1: top, 2: mid, 3: bot */)
 }
 
 const double leftmargin = 0.12 * textsize/0.06;
-const double rightmargin = 0.03;
+const double rightmargin = 0.01;
 
 void stylepad(TPad * pad)
 {
@@ -766,8 +768,8 @@ void process_rebin(TH1D *hist, TH1D * histlive,
    }
 
   ltitle->SetText(
-    dividebylivetime?0.15 + leftmargin/2: 0.16 + leftmargin/2,
-    dividebylivetime?0.98:0.933,
+    dividebylivetime?0.18 + leftmargin/2: 0.16 + leftmargin/2,
+    dividebylivetime?0.975:0.933,
     nwindows == 1? Form("%s #minus %s: %s", title_event, trigname, opts.name)
                  : Form("#splitline{%s}{%s: %s x %d}", title_event, trigname,
                         opts.name, nwindows));
@@ -829,8 +831,8 @@ void process_rebin(TH1D *hist, TH1D * histlive,
     stylehist(rebinned, 2);
     stylehist(rebinnedlive, 3);
 
-    divided ->GetYaxis()->SetTitle("Events/s");
-    rebinned->GetYaxis()->SetTitle("Raw");
+    divided ->GetYaxis()->SetTitle("Corrected events/s");
+    rebinned->GetYaxis()->SetTitle("Raw events/s");
 
     const double ytitleoff = 1.2 / sqrt(textsize/0.05);
     divided ->GetYaxis()->SetTitleOffset(ytitleoff);
@@ -1014,10 +1016,10 @@ void ligopass2(const char * const infilename_, const char * trigname_,
   }
 
   DOIT("supernovalike",
-       popts("Supernova-like events", "", 0, true, is_ndminbias? 0.53: 0));
+       popts("Supernova-like", "", 0, true, is_ndminbias? 0.53: 0));
 
-  DOIT("unslicedbighits", popts("Sub-supernova, high", "", 0, trigname[0] == 'N'));
-  DOIT("unslicedhits",    popts("Sub-supernova, low", "",     0, trigname[0] == 'N'));
+  DOIT("unslicedbighits", popts("Sub-supernova", "", 0, trigname[0] == 'N'));
+  DOIT("unslicedhits",    popts("Sub-supernova, no threshold", "",     0, trigname[0] == 'N'));
 
   // Skip rest, since it's redundant w/ 100% efficient ddactivity1.
   if(stream == neardet_long){
