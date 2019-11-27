@@ -595,20 +595,6 @@ int bumphunt(TH1D * hist, TH1D * histlive, const int rebin,
   return ret;
 }
 
-void randomtime()
-{
-  static TLatex * t = new TLatex(0, 0, "8:30 SNEWS Test");
-  t->SetTextColorAlpha(kGray, 0.5);
-  t->SetTextSize(textsize*textratiofull*2.5);
-  t->SetTextFont(42);
-  t->SetNDC();
-  t->SetTextAlign(22);
-  t->SetX(0.5);
-  t->SetY(0.5);
-  t->SetTextAngle(55);
-  //t->Draw();
-}
-
 void novapreliminary()
 {
   static TLatex * t = new TLatex(0, 0, "NOvA Preliminary");
@@ -794,7 +780,6 @@ void process_rebin(TH1D *hist, TH1D * histlive,
   ltitle->Draw();
 
   if(preliminary) novapreliminary();
-  randomtime();
 
   double mint = -500, maxt = 500;
 
@@ -890,7 +875,6 @@ void process_rebin(TH1D *hist, TH1D * histlive,
 
     rebinned->Draw("e");
     if(preliminary) novapreliminary();
-    randomtime();
     ltitle->Draw();
   }
 
