@@ -78,7 +78,7 @@ struct popts{
   }
 };
 
-const double textsize = 0.07;
+const double textsize = 0.073;
 const double topmargin = 0.085 * textsize/0.07;
 
 bool dividebylivetime = false;
@@ -95,7 +95,7 @@ const char * gwname = NULL;
 
 TCanvas USN;
 TPad * botpad, * midpad, * toppad;
-const double divheight1 = 0.26, divheight2 = 0.47;
+const double divheight1 = 0.25, divheight2 = 0.47;
 
 // Thanks ROOT for making this hard
 // Ratio of top pane to middle pane
@@ -104,6 +104,15 @@ const double textratiomid = (1-divheight2)/(divheight2 - divheight1);
 const double textratiobot = (1-divheight2)/divheight1;
 // Ratio of top pane to whole canvas
 const double textratiofull = 1-divheight2;
+
+const double canxsize_nodiv = 150.;
+const double canxsize_div = 100.;
+
+const double canysize_nodiv = 80.;
+const double canysize_div = 100.;
+
+const double textratiodivnodiv = textratiofull*canxsize_nodiv/canxsize_div
+ * canysize_div/canysize_nodiv;
 
 TH1D * lastlive = NULL;
 
@@ -159,7 +168,7 @@ void stylehist(TH1D * h, const int can /* 0: full, 1: top, 2: mid, 3: bot */)
   y->CenterTitle();
   x->CenterTitle();
 
-  const double siz = can == 0? textsize:
+  const double siz = can == 0? textsize*(dividebylivetime?1:textratiodivnodiv):
     can == 1? textsize:
     can == 2? textsize*textratiomid:
               textsize*textratiobot;
@@ -206,7 +215,8 @@ void stylecanvas(TCanvas * c)
   gStyle->SetOptStat(0);
 
   const double scale = 5.0;
-  c->SetCanvasSize((100 + (!dividebylivetime)*50)*scale, 100*scale);
+  c->SetCanvasSize((dividebylivetime?canxsize_div:canxsize_nodiv)*scale,
+    (dividebylivetime?canysize_div:canysize_nodiv)*scale);
 
   gStyle->SetGridColor(kGray);
   gStyle->SetGridStyle(kSolid);
@@ -226,7 +236,7 @@ void stylecanvas(TCanvas * c)
     midpad->SetTopMargin(0);
 
     botpad->SetTopMargin(0);
-    botpad->SetBottomMargin(0.078/divheight1);
+    botpad->SetBottomMargin(0.085/divheight1);
 
     toppad->SetGrid(1, 0);
     botpad->SetGrid(1, 0);
@@ -237,10 +247,10 @@ void stylecanvas(TCanvas * c)
     midpad->Draw();
   }
   else{
-    c->SetBottomMargin(0.150);
-    c->SetLeftMargin(0.175);
-    c->SetRightMargin(0.02);
-    c->SetTopMargin(0.125);
+    c->SetBottomMargin(0.155);
+    c->SetLeftMargin(leftmargin);
+    c->SetRightMargin(rightmargin);
+    c->SetTopMargin(0.08);
     c->SetTickx(1);
     c->SetTicky(1);
   }
@@ -599,7 +609,7 @@ void novapreliminary()
 {
   static TLatex * t = new TLatex(0, 0, "NOvA Preliminary");
   t->SetTextColorAlpha(kBlue, 0.5);
-  t->SetTextSize(dividebylivetime?textsize*textratiofull:textsize);
+  t->SetTextSize(dividebylivetime?textsize*textratiodivnodiv:textsize);
   t->SetTextFont(42);
   t->SetNDC();
   t->SetTextAlign(32);
@@ -736,6 +746,7 @@ double notnear200(const double x)
   return x;
 }
 
+// Process, possibly rebinning.  (If rebin=1, don't rebin.)
 // polyorder: order of the polynominal to fit for the no-signal hypothesis.
 //            Naively, zero.  For anything with pointing, at least 1.
 void process_rebin(TH1D *hist, TH1D * histlive,
@@ -768,12 +779,12 @@ void process_rebin(TH1D *hist, TH1D * histlive,
 
   ltitle->SetText(
     dividebylivetime?0.18 + leftmargin/2: 0.16 + leftmargin/2,
-    dividebylivetime?0.975:0.933,
+    dividebylivetime?0.975:0.955,
     nwindows == 1? Form("%s #minus %s: %s", title_event, trigname, opts.name)
                  : Form("#splitline{%s}{%s: %s x %d}", title_event, trigname,
                         opts.name, nwindows));
-  ltitle->SetTextSize((dividebylivetime?9./10.:9./11.)*
-                     (dividebylivetime?textsize*textratiofull:textsize));
+  ltitle->SetTextSize(dividebylivetime?textsize*textratiofull:
+                                       textsize*textratiodivnodiv);
   ltitle->SetTextFont(42);
   ltitle->SetTextAlign(12);
   ltitle->SetNDC();
@@ -833,7 +844,8 @@ void process_rebin(TH1D *hist, TH1D * histlive,
     rebinned->GetYaxis()->SetTitle("Raw events/s");
 
     const double ytitleoff = 1.2 / sqrt(textsize/0.05);
-    divided ->GetYaxis()->SetTitleOffset(ytitleoff);
+    divided ->GetYaxis()->SetTitleOffset(ytitleoff
+      + 0.08 * (divided->GetMaximum() > 10000 && divided->GetMaximum() < 100000));
     rebinned->GetYaxis()->SetTitleOffset(ytitleoff/textratiomid);
 
     // So it aligns to bottom of letters, not bottom of parentheses...
@@ -867,7 +879,7 @@ void process_rebin(TH1D *hist, TH1D * histlive,
     rebinned->GetYaxis()->SetTitleOffset(
       (rebinned->GetEntries() < 10? 0.8: rebinned->GetMaximum()<1000?1.1:
                                          rebinned->GetMaximum()<10000?1.4:1.6)
-       / sqrt(textsize/0.05));
+       / sqrt(textsize/0.05) * canysize_nodiv/canysize_div);
     if(rebin == 1)
       rebinned->GetYaxis()->SetTitle("Events/s");
     else
