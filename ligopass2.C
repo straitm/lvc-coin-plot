@@ -734,7 +734,20 @@ void bumphunt_nonpoisson(TH1D * h)
         longreadout?0.55:10, (toppad->GetUymax()-toppad->GetUymin())/30));
     }
   }
+}
 
+// Given a number x, return a number close to x that isn't too near a multiple
+// of 200.  This is for Y axes ranges so that the top label isn't cut off.
+double notnear200(const double x)
+{
+  // Axes labels definitely won't be in multiples of 200 anyway
+  if(x < 500) return x;
+  if(x > 2000) return x;
+
+  if(((int)x)%200 <  50) return int(x)/200 * 200 - 0.1;
+  if(((int)x)%200 > 150) return int(x)/200 * 200 + 199.9;
+
+  return x;
 }
 
 // polyorder: order of the polynominal to fit for the no-signal hypothesis.
@@ -854,8 +867,8 @@ void process_rebin(TH1D *hist, TH1D * histlive,
 
     const double midpadrange = rebinned->GetMaximum() - rebinned->GetMinimum();
     rebinned->GetYaxis()->SetRangeUser(
-      rebinned->GetMinimum() - midpadrange*0.2,
-      rebinned->GetMaximum() + midpadrange*0.2
+      std::max(0., rebinned->GetMinimum() - midpadrange*0.2),
+      notnear200(rebinned->GetMaximum() + midpadrange*0.2)
     );
 
     rebinned->Draw("hist");
