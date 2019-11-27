@@ -852,9 +852,13 @@ void process_rebin(TH1D *hist, TH1D * histlive,
 
     midpad->cd();
 
-    rebinned->GetYaxis()->SetRangeUser(0, rebinned->GetMaximum()*1.1 + sqrt(rebinned->GetMaximum()));
+    const double midpadrange = rebinned->GetMaximum() - rebinned->GetMinimum();
+    rebinned->GetYaxis()->SetRangeUser(
+      rebinned->GetMinimum() - midpadrange*0.2,
+      rebinned->GetMaximum() + midpadrange*0.2
+    );
 
-    rebinned->Draw("e");
+    rebinned->Draw("hist");
     midpad->Update(); // Necessary to get Uymin correctly!
     if(midpad->GetUymin() == 0) rebinned->GetYaxis()->ChangeLabel(1, -1, 0);
 
