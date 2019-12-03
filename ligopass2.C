@@ -93,6 +93,8 @@ const char * trigname = NULL;
 const char * infilename = NULL;
 const char * gwname = NULL;
 
+bool yaxishack1000 = false;
+
 TCanvas USN;
 TPad * botpad, * midpad, * toppad;
 const double divheight1 = 0.25, divheight2 = 0.47;
@@ -481,7 +483,7 @@ int bumphunt(TH1D * hist, TH1D * histlive, const int rebin,
 
   if(extexp > 0){
     polyorder = 1; // Just assume 1 (enforced by definition of popts) and
-                   // give the draw function enough paramters to do its work
+                   // give the draw function enough parameters to do its work
   }
   else{
     fit(mn, hist, histlive, polyorder);
@@ -496,14 +498,16 @@ int bumphunt(TH1D * hist, TH1D * histlive, const int rebin,
   TF1 * poly = new TF1("poly", fs.c_str(), hist->GetBinLowEdge(1),
                        hist->GetBinLowEdge(hist->GetNbinsX()+1));
 
+  const double scale = yaxishack1000? 1e-3: 1;
+
   if(extexp > 0){
-    poly->SetParameter(0, rebin*extexp);
-    poly->SetParameter(1, rebin*extexp1);
+    poly->SetParameter(0, rebin*extexp*scale);
+    poly->SetParameter(1, rebin*extexp1*scale);
   }
   else{
     for(unsigned int i = 0; i <= polyorder; i++){
-      poly->SetParameter(i, getpar(mn, i));
-      poly->SetParError(i, geterr(mn, i));
+      poly->SetParameter(i, getpar(mn, i)*scale);
+      poly->SetParError(i, geterr(mn, i)*scale);
     }
   }
   stylefunction(poly, extexp > 0);
@@ -519,7 +523,7 @@ int bumphunt(TH1D * hist, TH1D * histlive, const int rebin,
       double sum = 0;
       for(int j = 0; j < rebin; j++)
         sum += poly->Eval(fitraw->GetBinCenter(i+j))
-               * histlive->GetBinContent(i+j);
+               * histlive->GetBinContent(i+j)/scale;
       for(int j = 0; j < rebin; j++)
         fitraw->SetBinContent(i+j, sum);
     }
@@ -536,7 +540,7 @@ int bumphunt(TH1D * hist, TH1D * histlive, const int rebin,
     if(histlive->GetBinContent(i) == 0) continue;
 
     const double expected = poly->Eval(hist->GetBinCenter(i))
-      * histlive->GetBinContent(i);
+      * histlive->GetBinContent(i)/scale;
     const int actual = (int)hist->GetBinContent(i);
 
     const double prob = prob_this_or_more(actual, expected);
@@ -548,7 +552,7 @@ int bumphunt(TH1D * hist, TH1D * histlive, const int rebin,
   }
 
   const double expected = poly->Eval(hist->GetBinCenter(minprob_bin))
-    * histlive->GetBinContent(minprob_bin);
+    * histlive->GetBinContent(minprob_bin)/scale;
   const int actual = (int)hist->GetBinContent(minprob_bin);
 
   const enum stream_t stream = decodestream(trigname);
@@ -581,11 +585,11 @@ int bumphunt(TH1D * hist, TH1D * histlive, const int rebin,
              "   +- %-6.3g) + (\n%s_%s_P1 %-6.3g\n"
              "                 +- %-6.3g)t\n",
              codename, is_ddactivity1?"DDACTIVITY1":is_fdminbias?"FDMINBIAS":"?",
-             poly->GetParameter(0)/(dividebylivetime?1:nwindows),
-             poly->GetParError(0)/(dividebylivetime?1:nwindows),
+             poly->GetParameter(0)/scale/(dividebylivetime?1:nwindows),
+             poly->GetParError(0)/scale/(dividebylivetime?1:nwindows),
              codename,is_ddactivity1?"DDACTIVITY1":is_fdminbias?"FDMINBIAS":"?",
-             poly->GetParameter(1)/(dividebylivetime?1:nwindows),
-             poly->GetParError(1)/(dividebylivetime?1:nwindows));
+             poly->GetParameter(1)/scale/(dividebylivetime?1:nwindows),
+             poly->GetParError(1)/scale/(dividebylivetime?1:nwindows));
     }
   }
 
@@ -653,12 +657,21 @@ __attribute__((unused)) void printhist(TH1D & h)
   printf("\n");
 }
 
+static double minnonzero(TH1D * h)
+{
+  double min = 1e300;
+  for(int i = 1; i <= h->GetNbinsX(); i++)
+    if(h->GetBinContent(i) && h->GetBinContent(i) < min)
+      min = h->GetBinContent(i);
+  return min;
+}
+
 // Search for excursions from normal behavior for a series that isn't
 // Poissonian, like the total number of hits, which obviously has a lot
 // of correlated activity.
 void bumphunt_nonpoisson(TH1D * h)
 {
-  TH1D side("side", "", 100, h->GetMinimum()*0.999, h->GetMaximum()*1.001);
+  TH1D side("side", "", 100, minnonzero(h)*0.999, h->GetMaximum()*1.001);
 
   for(int i = 1; i <= h->GetNbinsX(); i++){
     if(longreadout && h->GetBinCenter(i) < np_longreadoutmin) continue;
@@ -673,13 +686,13 @@ void bumphunt_nonpoisson(TH1D * h)
   }
 
   TF1 Gaus("g", "[0]*exp(-pow(x-[1],2)/(2*[2]*[2]))",
-    h->GetMinimum()*0.999, h->GetMaximum()*1.001);
+    minnonzero(h)*0.999, h->GetMaximum()*1.001);
   Gaus.SetParameter(0, 10);
-  Gaus.SetParameter(1, (h->GetMaximum()+h->GetMinimum())/2);
-  Gaus.SetParameter(2, (h->GetMaximum()-h->GetMinimum())/10);
+  Gaus.SetParameter(1, (h->GetMaximum()+minnonzero(h))/2);
+  Gaus.SetParameter(2, (h->GetMaximum()-minnonzero(h))/10);
 
   // Important to prevent Fit from going crazy if there are outliers
-  Gaus.SetParLimits(1, h->GetMinimum(), h->GetMaximum());
+  Gaus.SetParLimits(1, minnonzero(h), h->GetMaximum());
 
   side.Fit("g", "l0");
 
@@ -733,6 +746,20 @@ void bumphunt_nonpoisson(TH1D * h)
 }
 
 // Given a number x, return a number close to x that isn't too near a multiple
+// of 5.  This is for Y axes ranges so that the bottom label isn't cut off.
+double notnear5(const double x)
+{
+  // Axes labels definitely won't be in multiples of 5 anyway
+  if(x < 10) return x;
+  if(x > 100) return x;
+
+  if(x - int(x/5)*5 < 1) return int(x)/5 * 5 - 1;
+  if(x - int(x/5)*5 > 4) return int(x)/5 * 5 + 4;
+
+  return x;
+}
+
+// Given a number x, return a number close to x that isn't too near a multiple
 // of 200.  This is for Y axes ranges so that the top label isn't cut off.
 double notnear200(const double x)
 {
@@ -778,7 +805,7 @@ void process_rebin(TH1D *hist, TH1D * histlive,
    }
 
   ltitle->SetText(
-    dividebylivetime?0.18 + leftmargin/2: 0.16 + leftmargin/2,
+    0.5 + leftmargin/2 - rightmargin/2,
     dividebylivetime?0.975:0.955,
     nwindows == 1? Form("%s #minus %s: %s", title_event, trigname, opts.name)
                  : Form("#splitline{%s}{%s: %s x %d}", title_event, trigname,
@@ -786,7 +813,7 @@ void process_rebin(TH1D *hist, TH1D * histlive,
   ltitle->SetTextSize(dividebylivetime?textsize*textratiofull:
                                        textsize*textratiodivnodiv);
   ltitle->SetTextFont(42);
-  ltitle->SetTextAlign(12);
+  ltitle->SetTextAlign(22);
   ltitle->SetNDC();
   ltitle->Draw();
 
@@ -840,12 +867,27 @@ void process_rebin(TH1D *hist, TH1D * histlive,
     stylehist(rebinned, 2);
     stylehist(rebinnedlive, 3);
 
-    divided ->GetYaxis()->SetTitle("Corrected events/s");
+    yaxishack1000 = divided->GetMaximum() > 10e3;
+    if(yaxishack1000) divided->Scale(1e-3);
+    divided->GetYaxis()->SetTitle(Form("%sCorrected events/s",
+      yaxishack1000?"10^{3} ":""));
     rebinned->GetYaxis()->SetTitle("Raw events/s");
 
     const double ytitleoff = 1.2 / sqrt(textsize/0.05);
-    divided ->GetYaxis()->SetTitleOffset(ytitleoff
+    divided->GetYaxis()->SetTitleOffset(ytitleoff
       + 0.08 * (divided->GetMaximum() > 10000 && divided->GetMaximum() < 100000));
+    if(!strcmp(hist->GetName(), "supernovalike")){
+      if(!strcmp(trigname, "ND long readout"))
+        divided->GetYaxis()->SetRangeUser(0.01, 7);
+      else if(!strcmp(trigname, "FD long readout"))
+        divided->GetYaxis()->SetRangeUser(100.1, 650);
+    }
+    else{
+      const double hi = divided->GetMaximum(), lo = minnonzero(divided);
+      divided->GetYaxis()->SetRangeUser(notnear5(lo - (hi-lo)*0.22),
+                                                 hi + (hi-lo)*0.12);
+    }
+
     rebinned->GetYaxis()->SetTitleOffset(ytitleoff/textratiomid);
 
     // So it aligns to bottom of letters, not bottom of parentheses...
@@ -853,7 +895,7 @@ void process_rebin(TH1D *hist, TH1D * histlive,
 
     rebinnedlive->GetYaxis()->SetTitle("Live (%)");
     rebinnedlive->Scale(100./rebin);
-    rebinnedlive->GetYaxis()->SetRangeUser(0, rebinnedlive->GetMaximum()*1.2);
+    rebinnedlive->GetYaxis()->SetRangeUser(0, rebinnedlive->GetMaximum()*1.23);
 
     toppad->cd();
     divided->Draw("e");
