@@ -293,7 +293,7 @@ void printend()
 void print2(const char * const name)
 {
 #ifdef SEPARATEPDFS
-  USN.Print(Form("%s-%s.pdf", outbase, name));
+  USN.Print(Form("%s-%s.eps", outbase, name));
 #endif
   USN.Print(Form("%s.pdf", outbase));
 }
