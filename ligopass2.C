@@ -6,6 +6,7 @@
 #include "Math/ProbFuncMathCore.h"
 #include "Math/QuantFuncMathCore.h"
 #include "TH1.h"
+#include "TH2.h"
 #include "TF1.h"
 #include "TGraph.h"
 #include "TLegend.h"
@@ -38,6 +39,8 @@ enum stream_t {
   fardet_minbias = fardet_t02 | fardet_long, UNDEFINED_STREAM
 };
 
+static stream_t stream = UNDEFINED_STREAM;
+
 struct popts{
   // Name to display on histograms and print in log
   const char * name;
@@ -45,7 +48,7 @@ struct popts{
   // Name to print in log and use for background lookup
   const char * codename;
 
-  // What order polynominal to fit the background time series to
+  // What order polynomial to fit the background time series to
   unsigned int polyorder;
 
   // Whether to run statistical tests on deviations from background
@@ -220,9 +223,6 @@ void stylecanvas(TCanvas * c)
   c->SetCanvasSize((dividebylivetime?canxsize_div:canxsize_nodiv)*scale,
     (dividebylivetime?canysize_div:canysize_nodiv)*scale);
 
-  gStyle->SetGridColor(kGray);
-  gStyle->SetGridStyle(kSolid);
-
   if(dividebylivetime){
     toppad = new TPad("div", "div", 0, divheight2, 1,          1);
     midpad = new TPad("raw", "raw", 0, divheight1, 1, divheight2);
@@ -239,10 +239,6 @@ void stylecanvas(TCanvas * c)
 
     botpad->SetTopMargin(0);
     botpad->SetBottomMargin(0.085/divheight1);
-
-    toppad->SetGrid(1, 0);
-    botpad->SetGrid(1, 0);
-    midpad->SetGrid(1, 0);
 
     toppad->Draw();
     botpad->Draw();
@@ -436,8 +432,8 @@ void setup_mn(TMinuit & mn, const unsigned int polyorder)
 void stylefunction(TF1 * f, const bool externalexpectation)
 {
   f->SetLineColor(externalexpectation?kBlue:kRed);
-  f->SetLineStyle(externalexpectation?9:1);
-  f->SetLineWidth(externalexpectation?3:2);
+  f->SetLineStyle(1);
+  f->SetLineWidth(3);
   if(!externalexpectation) f->SetNpx(500);
 }
 
@@ -446,23 +442,23 @@ void stylefitraw(TH1D * fitraw, const bool externalexpectation)
   fitraw->SetLineWidth(2);
   fitraw->SetLineColor(externalexpectation?kBlue:kRed);
   fitraw->SetMarkerColor(externalexpectation?kBlue:kRed);
-  fitraw->SetLineStyle(externalexpectation?9:1);
+  fitraw->SetLineStyle(1);
 }
 
 enum stream_t decodestream(const char * const trigname)
 {
-  enum stream_t stream = UNDEFINED_STREAM;
-  if     (!strcmp(trigname, "FD 10Hz trigger"  )) stream = fardet_t02;
-  else if(!strcmp(trigname, "ND energy trigger")) stream = neardet_ddactivity1;
-  else if(!strcmp(trigname, "FD energy trigger")) stream = fardet_ddenergy;
-  else if(!strcmp(trigname, "ND long readout"  )) stream = neardet_long;
-  else if(!strcmp(trigname, "FD long readout"  )) stream = fardet_long;
+  enum stream_t strm = UNDEFINED_STREAM;
+  if     (!strcmp(trigname, "FD 10Hz trigger"  )) strm = fardet_t02;
+  else if(!strcmp(trigname, "ND energy trigger")) strm = neardet_ddactivity1;
+  else if(!strcmp(trigname, "FD energy trigger")) strm = fardet_ddenergy;
+  else if(!strcmp(trigname, "ND long readout"  )) strm = neardet_long;
+  else if(!strcmp(trigname, "FD long readout"  )) strm = fardet_long;
 
-  if(stream == UNDEFINED_STREAM){
+  if(strm == UNDEFINED_STREAM){
     fprintf(stderr, "I don't know what to do with \"%s\"\n", trigname);
     exit(1);
   }
-  return stream;
+  return strm;
 }
 
 // Look for an excess anywhere in the histogram.  If 'extexp'
@@ -555,7 +551,6 @@ int bumphunt(TH1D * hist, TH1D * histlive, const int rebin,
     * histlive->GetBinContent(minprob_bin)/scale;
   const int actual = (int)hist->GetBinContent(minprob_bin);
 
-  const enum stream_t stream = decodestream(trigname);
   const int nbins = (stream == neardet_long || stream == fardet_long)? 45: 1000;
 
   const double localprob = prob_this_or_more(actual, expected);
@@ -773,8 +768,261 @@ double notnear200(const double x)
   return x;
 }
 
+static TH1D * snhist = NULL, * snhistlive = NULL, * snmc = NULL;
+
+// The objective function for MINUIT.
+static void snlike(__attribute__((unused)) int & np,
+                   __attribute__((unused)) double * gin,
+                   double & llike, double * par, __attribute__((unused)) int flag)
+{
+  llike = 0;
+
+  const double flat = par[0];
+  const double snnorm = par[1];
+
+  for(int i = 1; i <= snhist->GetNbinsX(); i++){
+    const double data = snhist->GetBinContent(i);
+
+    const double snmcexpect = snmc->GetBinContent(i) * snnorm;
+    const double expect = snhistlive->GetBinContent(i)*(flat + snmcexpect);
+
+    if(expect <= 0) continue;
+
+    llike += expect;
+
+    if(data > 0)
+      llike += - data + data * log(data/expect);
+  }
+
+  llike *= 2;
+}
+
+static int dig(const double n)
+{
+  return (Form("%.1g", n)[0] - '0' <= 2 &&
+          Form("%.2g", n)[0] - '0' <= 2)? 2: 1;
+}
+
+void draw_flux_limit(const double step, const double * const prob,
+                     const unsigned int N, const double limit, const bool is27)
+{
+  const double size = 0.067;
+
+  const double markersize = 1.5;
+
+  TCanvas * c1 = new TCanvas();
+  c1->SetRightMargin(0.04);
+  c1->SetTopMargin(0.03);
+  c1->SetBottomMargin(0.15);
+  c1->SetLeftMargin(0.14);
+  c1->SetCanvasSize(600, 400);
+  gStyle->SetOptStat(0);
+  c1->SetTickx();
+  c1->SetTicky();
+
+  const double xmin = 0, xmax = stream == fardet_long || stream == neardet_long?2: 20,
+               ymin = 0, ymax = 1.099;
+
+  const int stepstep = xmax < 2?1: xmax < 20?10:30;
+
+  TH2D * dum = new TH2D("dum", "", 1, xmin, xmax, 1, ymin, ymax);
+
+  dum->GetXaxis()->SetTickLength(0.02);
+  dum->GetYaxis()->SetTickLength(0.02);
+  dum->GetXaxis()->SetTitle(Form("%s signal strength relative to 10#kern[-0.5]{ }kpc",
+                                 gwname));
+  dum->GetYaxis()->SetTitle("Prob density (arb units)");
+  dum->GetXaxis()->CenterTitle();
+  dum->GetYaxis()->CenterTitle();
+  dum->GetXaxis()->SetTitleSize(size);
+  dum->GetYaxis()->SetTitleSize(size);
+  dum->GetXaxis()->SetLabelSize(size);
+  dum->GetYaxis()->SetLabelSize(size);
+  dum->GetYaxis()->SetTitleOffset(1.0);
+  dum->GetXaxis()->SetNdivisions(stream == fardet_long || stream == neardet_long? 8:516);
+  dum->GetYaxis()->SetDecimals();
+
+  dum->Draw();
+
+  TGraph g, gfill;
+  for(unsigned int i = 0; i < N; i+=stepstep){
+    if(i*step > xmax) continue;
+
+    g.SetPoint(g.GetN(), i*step, prob[i]);
+    if(i*step < limit)
+      gfill.SetPoint(g.GetN(), i*step, prob[i]);
+  }
+ 
+  gfill.SetPoint(gfill.GetN(), gfill.GetX()[gfill.GetN()-1], 0);
+  gfill.SetPoint(gfill.GetN(), 0, 0);
+
+  g.SetLineWidth(2);
+  g.SetLineColor(kBlack);
+  g.SetMarkerColor(kBlack);
+
+  gfill.SetFillStyle(1001);
+  gfill.SetFillColor(kGray);
+
+  gfill.Draw("lf");
+  g.Draw("l");
+
+  TLegend leg(0.31, 0.65, 0.80, 0.93);
+  leg.SetTextSize(size);
+  leg.SetBorderSize(0);
+  leg.SetFillStyle(0);
+  leg.SetTextFont(42);
+
+  leg.AddEntry((TH1D*)NULL,
+    Form("%s solar mass Garching", is27?"27":"9.6"), "");
+  leg.AddEntry((TH1D*)NULL, 
+    stream == fardet_t02? "FD 10Hz"
+   :stream == fardet_long? "FD long readout"
+   :stream == neardet_long?"ND long readout"
+   :"???", "");
+
+  leg.AddEntry((TH1D*)NULL,
+    Form("< %.1f of 10#kern[-0.5]{ }kpc at 90%% CL", limit), "");
+  leg.AddEntry((TH1D*)NULL,
+    Form("#Rightarrow  > %.0f#kern[-0.5]{ }kpc at 90%% CL", 10/sqrt(limit)), "");
+
+  leg.Draw();
+
+  c1->RedrawAxis();
+
+  c1->SaveAs(Form("fluxlimit-%s-%s-%ssolarmass.pdf", gwname,
+    stream == fardet_t02? "FD10Hz"
+   :stream == fardet_long? "FDlongreadout"
+   :stream == neardet_long?"NDlongreadout"
+   :"somethingelse",
+    is27?"27":"9.6"));
+}
+
+static TH1D * sn_10kpc = NULL;
+
+std::pair<double, double>
+supernova_flux_limit(TH1D *hist, TH1D * histlive, const double bg, const bool is27)
+{
+  sn_10kpc = (TH1D*)hist->Clone("sn");
+  sn_10kpc->Reset();
+
+  if(is_fdminbias){
+    // For 9.6 solar mass Garching flux, as found in Andrey's files.  I just had
+    // to do a little post-processing since somehow all the timestamps are zero
+    // in his file.  However, as long as I assume that it's a progression of
+    // contiguous 5ms events, it's fine.
+    //
+    // The 6th bin and onward for 27 solar masses are taken from an analytic
+    // Garching curve, matched to the shape of the MC.
+    sn_10kpc->SetBinContent(sn_10kpc->FindBin(0),  is27?239                  :47);
+    sn_10kpc->SetBinContent(sn_10kpc->FindBin(1),  is27? 77                  :42);
+    sn_10kpc->SetBinContent(sn_10kpc->FindBin(2),  is27? 41                  :16);
+    sn_10kpc->SetBinContent(sn_10kpc->FindBin(3),  is27? 26                  : 9);
+    sn_10kpc->SetBinContent(sn_10kpc->FindBin(4),  is27? 15                  : 7);
+    sn_10kpc->SetBinContent(sn_10kpc->FindBin(5),  is27? 10                  : 1);
+    sn_10kpc->SetBinContent(sn_10kpc->FindBin(6),  is27?52.7209*pow(2./10, 2): 0);
+    sn_10kpc->SetBinContent(sn_10kpc->FindBin(7),  is27?35.4769*pow(2./10, 2): 0);
+    sn_10kpc->SetBinContent(sn_10kpc->FindBin(8),  is27?24.0291*pow(2./10, 2): 0);
+    sn_10kpc->SetBinContent(sn_10kpc->FindBin(9),  is27?15.4561*pow(2./10, 2): 0);
+    sn_10kpc->SetBinContent(sn_10kpc->FindBin(10), is27? 8.54  *pow(2./10, 2): 0);
+    sn_10kpc->SetBinContent(sn_10kpc->FindBin(11), is27? 4.70  *pow(2./10, 2): 0);
+  }
+  else{
+    // For 9.6 solar mass Garching flux, as found in Andrey's files.  His 2kpc
+    // file has 89 events total, which makes 3.6 at 10kpc, or 18 true events at
+    // 10kpc assuming 20% efficiency.  I think that efficiency means fiducial
+    // volume, so that's really 27 true events or so.
+    //
+    // This is close to the 33 IBD events predicted by GVKM, as found on
+    // Justin's 2017 APS poster.  It's still close if elastic scattering is
+    // included in the Garching MC, which looks to be true.
+    sn_10kpc->SetBinContent(sn_10kpc->FindBin(0), is27? 5.22378  : 1.1014   );
+    sn_10kpc->SetBinContent(sn_10kpc->FindBin(1), is27? 1.73077  : 0.818182 );
+    sn_10kpc->SetBinContent(sn_10kpc->FindBin(2), is27? 0.314685 : 0.660839 );
+    sn_10kpc->SetBinContent(sn_10kpc->FindBin(3), is27? 0.251748 : 0.22028  );
+    sn_10kpc->SetBinContent(sn_10kpc->FindBin(4), is27? 0.0314685: 0.0629371);
+    sn_10kpc->SetBinContent(sn_10kpc->FindBin(5), is27? 0.0314685: 0.0314685);
+  }
+
+  const double replive = histlive->GetBinContent(histlive->FindBin(1.5));
+  const double mostlylive = replive > 0.1;
+
+  TMinuit mn(2);
+  mn.fGraphicsMode = false;
+  int ierr;
+  mn.mnparm(0, "const", is_fdminbias?400:0.4, is_fdminbias?30.:0.05, 0, 0, ierr);
+  mn.mnparm(1, "sn",    0.1 , 0.1, 0, mostlylive?2:400, ierr);
+
+  mn.SetFCN(snlike);
+
+  if(bg != 0){
+    mn.Command(Form("SET PAR 1 %f", bg));
+    mn.Command("FIX 1");
+  }
+
+  snhist = hist;
+  snhistlive = histlive;
+  snmc = sn_10kpc;
+
+  mn.Command("SCAN");
+  mn.Command("MIGRAD");
+  if(bg == 0) mn.Command("MNCONT 1 2 100");
+
+  const std::pair<double, double> ans(getpar(mn, 0), getpar(mn, 1));
+
+  const double gmin = mn.fAmin;
+
+  const double step = 0.001;
+  const int N = 100000;
+  double prob[N];
+  memset(prob, 0, sizeof(double)*N);
+
+  mn.Command("FIX 2");
+
+  mn.Command("SET PRINT -1");
+  bool worthit = true;
+  for(int i = 0; i < N; i++){
+    if(worthit){
+      mn.Command(Form("SET PAR 2 %f", i*step));
+      if(bg == 0) mn.Command("MIGRAD");
+      else        mn.Command("CALL");
+      prob[i] = exp(-(mn.fAmin-gmin));
+      printf("snprob%s %10f %10g\n", is27?"27":"9.6", i*step, prob[i]);
+      if(i > 0 && prob[i] < prob[i-1] && prob[i] < 1e-30) worthit = false;
+    }
+    else{
+      printf("snprob%s %10f 0\n", is27?"27":"9.6", i*step);
+    }
+  }
+  mn.Command("SET PRINT 1");
+
+  double totprob = 0;
+  for(int i = 0; i < N; i++) totprob += prob[i];
+
+  double accprob = 0;
+  double limit = 0;
+  for(int i = 0; i < N; i++){
+    accprob += prob[i];
+    if(accprob/totprob > 0.9){
+      const int ndigf = dig(i*step);
+      const int ndigd = dig(10/sqrt(i*step));
+      limit = i*step;
+      printf("90%% CL at %.*g of 10kpc %sSN-like flux, %.*g kpc\n",
+             ndigf, limit, is27?"27":"9.6", ndigd, 10/sqrt(limit));
+      break;
+    }
+  }
+
+  draw_flux_limit(step, prob, N, limit, is27);
+
+#if 0
+  exit(0);
+#endif
+
+  return ans;
+}
+
 // Process, possibly rebinning.  (If rebin=1, don't rebin.)
-// polyorder: order of the polynominal to fit for the no-signal hypothesis.
+// polyorder: order of the polynomial to fit for the no-signal hypothesis.
 //            Naively, zero.  For anything with pointing, at least 1.
 void process_rebin(TH1D *hist, TH1D * histlive,
                    const int rebin, const popts opts)
@@ -784,6 +1032,14 @@ void process_rebin(TH1D *hist, TH1D * histlive,
     (TH1D*)histlive->Rebin(rebin, "rebinnedlive");
 
   stylehist(rebinned, 0);
+
+  // Make the 27-solar-mass PDFs, but discard the fit
+  if(!strcmp(opts.name, "Supernova-like"))
+    supernova_flux_limit(hist, histlive, opts.extexp, true);
+
+  const std::pair<double, double> snfit = !strcmp(opts.name, "Supernova-like")?
+     supernova_flux_limit(hist, histlive, opts.extexp, false)
+    : std::pair<double, double>(0, 0);
 
   const bool setlogy = opts.extexp > 1 || !dividebylivetime;
 
@@ -880,7 +1136,7 @@ void process_rebin(TH1D *hist, TH1D * histlive,
       if(!strcmp(trigname, "ND long readout"))
         divided->GetYaxis()->SetRangeUser(0.01, 7);
       else if(!strcmp(trigname, "FD long readout"))
-        divided->GetYaxis()->SetRangeUser(100.1, 650);
+        divided->GetYaxis()->SetRangeUser(350.1, 650);
     }
     else{
       const double hi = divided->GetMaximum(), lo = minnonzero(divided);
@@ -970,6 +1226,16 @@ void process_rebin(TH1D *hist, TH1D * histlive,
     }
   }
 
+  if(!strcmp(opts.name, "Supernova-like")){
+    toppad->cd();
+    for(int i = 1; i <= sn_10kpc->GetNbinsX(); i++)
+      sn_10kpc->SetBinContent(i, sn_10kpc->GetBinContent(i) + snfit.first);
+    sn_10kpc->SetLineWidth(3);
+    sn_10kpc->SetLineStyle(kDashed);
+    sn_10kpc->SetLineColor(is_fdminbias?kRed:kBlue);
+    sn_10kpc->Draw("same][");
+  }
+
   print2(Form("%s-%ds", hist->GetName(), rebin));
 }
 
@@ -1047,7 +1313,7 @@ void ligopass2(const char * const infilename_, const char * trigname_,
     printf("Evaluating background using a sample of %d windows\n", nwindows);
   }
 
-  enum stream_t stream = decodestream(trigname);
+  stream = decodestream(trigname);
 
   gErrorIgnoreLevel = kWarning; // Don't print about making PDFs
 

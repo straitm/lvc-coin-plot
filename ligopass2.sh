@@ -1,13 +1,20 @@
 #!/bin/bash
 
-if [ $# -ne 1 ] && [ $# -ne 2 ]; then
+if [ $# -gt 2 ]; then
   echo Wrong number of arguments $#
   echo Syntax: $(basename $0) histfile GWeventname
   echo Or: $(basename $0) histfile
+  echo Or: $(basename $0)
   echo Histfile has to have a standard trigger name in it
   echo GWeventname should match a background file name
   echo I will try to infer the GWeventname if you do not give it
+  echo Without arguments, I just compile
   exit 1
+fi
+
+if ! [ $1 ]; then
+  printf '.L %s+O\n.q' $(dirname $0)/ligopass2.C | root -n -l -b 
+  exit
 fi
 
 histfile=$1
@@ -63,7 +70,7 @@ else
   exit 1
 fi
 
-root -n -l -b -q $(dirname $0)/ligopass2.C+\
+root -n -l -b -q $(dirname $0)/ligopass2.C+O\
 '("'"$histfile"'","'"$trigname"'","'"$pdfbase"'",'\
 $livetimediv', '$longreadout', '$nwindows', "'$(dirname $0)/$bgfile'", "'$gwname'")' \
  2> /dev/stdout | tee $pdfbase.log
