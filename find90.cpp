@@ -8,15 +8,18 @@
 #include "TLegend.h"
 #include "TCanvas.h"
 #include "TStyle.h"
+#include "TError.h"
 
 using std::vector;
 
 static char * gwname = NULL, * mass = NULL;
 
+static bool is27 = false;
+
 static int dig(const double n)
 {
-  return (Form("%.1g", n)[0] - '0' <= 2 &&
-          Form("%.2g", n)[0] - '0' <= 2)? 2: 1;
+  return (Form("%.1e", n)[0] - '0' <= 2 &&
+          Form("%.2e", n)[0] - '0' <= 2)? 2: 1;
 }
 
 static double il(const vector<double> & pr)
@@ -39,6 +42,8 @@ void draw_flux_limit(const vector<double> & norm,
                      const double limit)
 {
   const double size = 0.067;
+
+  gErrorIgnoreLevel = kError;
 
   TCanvas * c1 = new TCanvas();
   c1->SetRightMargin(0.04);
@@ -122,13 +127,49 @@ void draw_flux_limit(const vector<double> & norm,
 
   c1->SaveAs(Form("fluxlimit-%s-combined-%ssolarmass.pdf", gwname, mass));
 }
+//
+// Given a distance limit in kpc, return a fluence limit in neutrinos/cm2
+static double fllimit(const double distlimit)
+{
+  // We could do this in erg/cm2, but let's do it in neutrinos/cm2
+  // to match the KamLAND paper.
+#if 0
+  // Found from
+  // awk '!/^#/{sum += $2*($1-oldt); oldt=$1}END{print sum}'
+  //   neutrino_signal_nu_{x,xbar,e,ebar}-LS220-z9.6co.txt
+  //
+  // same for neutrino_signal_nu_{x,xbar,e,ebar}-LS220-s27.0co.txt
+  const double totE = is27? 224.504e51: 125.637e51;
+#endif
+
+  // awk '!/^#/{if($3 != 0) 
+  //   sum += $2*($1-oldt) * 1e51/($3 / 624150.91); oldt=$1}
+  //   END{printf("%g\n", sum)}'
+  // neutrino_signal_nu_{x,xbar,e,ebar}-LS220-s27.0co.txt
+  const double totN = is27? 1.11556e+58: 6.78803e+57;
+
+  const double benchmarkdist = 10.; // kpc
+
+  const double cmperkpc = 3.0856776e+21;
+
+  const double cm2at10kpc = 4*M_PI*pow(benchmarkdist * cmperkpc, 2);
+
+  const double fluencerat = pow(benchmarkdist/distlimit, 2);
+
+  const double benchmarkfluence = totN/cm2at10kpc;
+
+  return fluencerat * benchmarkfluence;
+}
+
 
 int main(int argc, char ** argv)
 {
   double n = 0, p1 = 0, p2 = 0;
 
   if(argc > 1) gwname = argv[1];
-  if(argc > 1) mass = argv[2];
+  if(argc > 2) mass = argv[2];
+
+  is27 = !strcmp(mass, "27");
 
   vector<double> prob1, prob2, prob, norm;
   while(std::cin >> n >> p1 >> p2){
@@ -146,11 +187,14 @@ int main(int argc, char ** argv)
   const double n2 = 10/sqrt(norm[itot]);
   const double n3 = 10/sqrt(norm[i1]);
   const double n4 = 10/sqrt(norm[i2]);
-  printf("90%% CL at %.*g of 10kpc SN-like flux, %.*g kpc (%.*g, %.*g)",
+  const double n5 = fllimit(n2)/1e12;
+  printf("90%% CL at %.*g of 10kpc SN-like flux, %.*g kpc (%.*g, %.*g)"
+         " %#.*g /cm2\n",
          dig(n1), n1,
          dig(n2), n2,
          dig(n3), n3,
-         dig(n4), n4);
+         dig(n4), n4,
+         dig(n5), n5);
 
   draw_flux_limit(norm, prob, n1);
 

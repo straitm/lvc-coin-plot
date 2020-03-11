@@ -1,0 +1,38 @@
+#!/bin/bash
+
+cite()
+{
+  if [ ${e:0:1} == G ]; then
+    printf '%s~\\cite{ligocat}' $e
+  else
+    printf '\\citegcn{%s}' $e
+  fi
+}
+
+mfdndligo()
+{
+  e=$1
+  mass=$2
+  t1=$3
+  t2=$4
+  ligopass2/ligopass2.sh ligoresults-$e/20*fardet-ligo.hadded.root | \
+    grep snprob$mass | awk '{print $2, $3}' > a$e &
+  ligopass2/ligopass2.sh ligoresults-$e/20*neardet-ligo.hadded.root | \
+    grep snprob$mass | awk '{print $3}' > b$e &
+
+  wait
+
+  paste a$e b$e > comb$e
+
+  if [ $mass == 27 ]; then
+    printf '%24s & %11s & %11s & %5s ' \
+      $(cite $e) $t1 $t2 \
+      $(ligopass2/find90 $e $mass < comb$e | awk '{print $13}')
+  else
+    printf '& %5s \\\\\n' \
+      $(ligopass2/find90 $e $mass < comb$e | awk '{print $13}')
+  fi
+}
+
+mfdndligo $1 27  $2 $3
+mfdndligo $1 9.6 $2 $3

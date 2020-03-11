@@ -1,0 +1,31 @@
+#!/bin/bash
+
+cite()
+{
+  if [ ${e:0:1} == G ]; then
+    printf '%s~\\cite{ligocat}' $e
+  else
+    printf '\\citegcn{%s}' $e
+  fi
+}
+
+mjustt02()
+{
+  e=$1
+  mass=$2
+  if [ $mass == 27 ]; then
+    printf '%24s & Untriggered & Untriggered & %5s ' \
+      $(cite $e) \
+      $(ligopass2/ligopass2.sh ligoresults-$e/20*fardet-t02.hadded.root | \
+        grep "${mass}SN-like flux" | \
+        awk '{print $11}')
+  else
+    printf '& %5s \\\\\n' \
+      $(ligopass2/ligopass2.sh ligoresults-$e/20*fardet-t02.hadded.root | \
+        grep "${mass}SN-like flux" | \
+        awk '{print $11}')
+  fi
+}
+
+mjustt02 $1 27
+mjustt02 $1 9.6

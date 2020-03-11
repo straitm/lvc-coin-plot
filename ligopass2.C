@@ -799,8 +799,8 @@ static void snlike(__attribute__((unused)) int & np,
 
 static int dig(const double n)
 {
-  return (Form("%.1g", n)[0] - '0' <= 2 &&
-          Form("%.2g", n)[0] - '0' <= 2)? 2: 1;
+  return (Form("%.1e", n)[0] - '0' <= 2 &&
+          Form("%.2e", n)[0] - '0' <= 2)? 2: 1;
 }
 
 void draw_flux_limit(const double step, const double * const prob,
@@ -897,13 +897,49 @@ void draw_flux_limit(const double step, const double * const prob,
     is27?"27":"9.6"));
 }
 
-static TH1D * sn_10kpc = NULL;
+// Given a distance limit in kpc, return a fluence limit in neutrinos/cm2
+static double fllimit(const double distlimit, const bool is27)
+{
+  // We could do this in erg/cm2, but let's do it in neutrinos/cm2
+  // to match the KamLAND paper.
+#if 0
+  // Found from
+  // awk '!/^#/{sum += $2*($1-oldt); oldt=$1}END{print sum}'
+  //   neutrino_signal_nu_{x,xbar,e,ebar}-LS220-z9.6co.txt
+  //
+  // same for neutrino_signal_nu_{x,xbar,e,ebar}-LS220-s27.0co.txt
+  const double totE = is27? 224.504e51: 125.637e51;
+#endif
+
+  // awk '!/^#/{if($3 != 0) 
+  //   sum += $2*($1-oldt) * 1e51/($3 / 624150.91); oldt=$1}
+  //   END{printf("%g\n", sum)}'
+  // neutrino_signal_nu_{x,xbar,e,ebar}-LS220-s27.0co.txt
+  const double totN = is27? 1.11556e+58: 6.78803e+57;
+
+  const double benchmarkdist = 10.; // kpc
+
+  const double cmperkpc = 3.0856776e+21;
+
+  const double cm2at10kpc = 4*M_PI*pow(benchmarkdist * cmperkpc, 2);
+
+  const double fluencerat = pow(benchmarkdist/distlimit, 2);
+
+  const double benchmarkfluence = totN/cm2at10kpc;
+
+  return fluencerat * benchmarkfluence;
+}
+
+static TH1D * sn_10kpc_27 = NULL, * sn_10kpc_96 = NULL, * sn_10kpc = NULL;
 
 std::pair<double, double>
 supernova_flux_limit(TH1D *hist, TH1D * histlive, const double bg, const bool is27)
 {
-  sn_10kpc = (TH1D*)hist->Clone("sn");
-  sn_10kpc->Reset();
+  sn_10kpc_27 = (TH1D*)hist->Clone("sn");
+  sn_10kpc_96 = (TH1D*)hist->Clone("sn");
+  sn_10kpc_27->Reset();
+  sn_10kpc_96->Reset();
+  sn_10kpc = is27? sn_10kpc_27: sn_10kpc_96;
 
   if(is_fdminbias){
     // For 9.6 solar mass Garching flux, as found in Andrey's files.  I just had
@@ -913,18 +949,31 @@ supernova_flux_limit(TH1D *hist, TH1D * histlive, const double bg, const bool is
     //
     // The 6th bin and onward for 27 solar masses are taken from an analytic
     // Garching curve, matched to the shape of the MC.
-    sn_10kpc->SetBinContent(sn_10kpc->FindBin(0),  is27?239                  :47);
-    sn_10kpc->SetBinContent(sn_10kpc->FindBin(1),  is27? 77                  :42);
-    sn_10kpc->SetBinContent(sn_10kpc->FindBin(2),  is27? 41                  :16);
-    sn_10kpc->SetBinContent(sn_10kpc->FindBin(3),  is27? 26                  : 9);
-    sn_10kpc->SetBinContent(sn_10kpc->FindBin(4),  is27? 15                  : 7);
-    sn_10kpc->SetBinContent(sn_10kpc->FindBin(5),  is27? 10                  : 1);
-    sn_10kpc->SetBinContent(sn_10kpc->FindBin(6),  is27?52.7209*pow(2./10, 2): 0);
-    sn_10kpc->SetBinContent(sn_10kpc->FindBin(7),  is27?35.4769*pow(2./10, 2): 0);
-    sn_10kpc->SetBinContent(sn_10kpc->FindBin(8),  is27?24.0291*pow(2./10, 2): 0);
-    sn_10kpc->SetBinContent(sn_10kpc->FindBin(9),  is27?15.4561*pow(2./10, 2): 0);
-    sn_10kpc->SetBinContent(sn_10kpc->FindBin(10), is27? 8.54  *pow(2./10, 2): 0);
-    sn_10kpc->SetBinContent(sn_10kpc->FindBin(11), is27? 4.70  *pow(2./10, 2): 0);
+    sn_10kpc_27->SetBinContent(sn_10kpc->FindBin(0), 239                  );
+    sn_10kpc_27->SetBinContent(sn_10kpc->FindBin(1),  77                  );
+    sn_10kpc_27->SetBinContent(sn_10kpc->FindBin(2),  41                  );
+    sn_10kpc_27->SetBinContent(sn_10kpc->FindBin(3),  26                  );
+    sn_10kpc_27->SetBinContent(sn_10kpc->FindBin(4),  15                  );
+    sn_10kpc_27->SetBinContent(sn_10kpc->FindBin(5),  10                  );
+    sn_10kpc_27->SetBinContent(sn_10kpc->FindBin(6), 52.7209*pow(2./10, 2));
+    sn_10kpc_27->SetBinContent(sn_10kpc->FindBin(7), 35.4769*pow(2./10, 2));
+    sn_10kpc_27->SetBinContent(sn_10kpc->FindBin(8), 24.0291*pow(2./10, 2));
+    sn_10kpc_27->SetBinContent(sn_10kpc->FindBin(9), 15.4561*pow(2./10, 2));
+    sn_10kpc_27->SetBinContent(sn_10kpc->FindBin(10), 8.54  *pow(2./10, 2));
+    sn_10kpc_27->SetBinContent(sn_10kpc->FindBin(11), 4.70  *pow(2./10, 2));
+
+    sn_10kpc_96->SetBinContent(sn_10kpc->FindBin(0), 47);
+    sn_10kpc_96->SetBinContent(sn_10kpc->FindBin(1), 42);
+    sn_10kpc_96->SetBinContent(sn_10kpc->FindBin(2), 16);
+    sn_10kpc_96->SetBinContent(sn_10kpc->FindBin(3),  9);
+    sn_10kpc_96->SetBinContent(sn_10kpc->FindBin(4),  7);
+    sn_10kpc_96->SetBinContent(sn_10kpc->FindBin(5),  1);
+    sn_10kpc_96->SetBinContent(sn_10kpc->FindBin(6),  0);
+    sn_10kpc_96->SetBinContent(sn_10kpc->FindBin(7),  0);
+    sn_10kpc_96->SetBinContent(sn_10kpc->FindBin(8),  0);
+    sn_10kpc_96->SetBinContent(sn_10kpc->FindBin(9),  0);
+    sn_10kpc_96->SetBinContent(sn_10kpc->FindBin(10), 0);
+    sn_10kpc_96->SetBinContent(sn_10kpc->FindBin(11), 0);
   }
   else{
     // For 9.6 solar mass Garching flux, as found in Andrey's files.  His 2kpc
@@ -935,12 +984,22 @@ supernova_flux_limit(TH1D *hist, TH1D * histlive, const double bg, const bool is
     // This is close to the 33 IBD events predicted by GVKM, as found on
     // Justin's 2017 APS poster.  It's still close if elastic scattering is
     // included in the Garching MC, which looks to be true.
-    sn_10kpc->SetBinContent(sn_10kpc->FindBin(0), is27? 5.22378  : 1.1014   );
-    sn_10kpc->SetBinContent(sn_10kpc->FindBin(1), is27? 1.73077  : 0.818182 );
-    sn_10kpc->SetBinContent(sn_10kpc->FindBin(2), is27? 0.314685 : 0.660839 );
-    sn_10kpc->SetBinContent(sn_10kpc->FindBin(3), is27? 0.251748 : 0.22028  );
-    sn_10kpc->SetBinContent(sn_10kpc->FindBin(4), is27? 0.0314685: 0.0629371);
-    sn_10kpc->SetBinContent(sn_10kpc->FindBin(5), is27? 0.0314685: 0.0314685);
+    //
+    // XXX the stats are really too low here
+
+    sn_10kpc_27->SetBinContent(sn_10kpc->FindBin(0), 5.22378  );
+    sn_10kpc_27->SetBinContent(sn_10kpc->FindBin(1), 1.73077  );
+    sn_10kpc_27->SetBinContent(sn_10kpc->FindBin(2), 0.314685 );
+    sn_10kpc_27->SetBinContent(sn_10kpc->FindBin(3), 0.251748 );
+    sn_10kpc_27->SetBinContent(sn_10kpc->FindBin(4), 0.0314685);
+    sn_10kpc_27->SetBinContent(sn_10kpc->FindBin(5), 0.0314685);
+
+    sn_10kpc_96->SetBinContent(sn_10kpc->FindBin(0), 1.1014   );
+    sn_10kpc_96->SetBinContent(sn_10kpc->FindBin(1), 0.818182 );
+    sn_10kpc_96->SetBinContent(sn_10kpc->FindBin(2), 0.660839 );
+    sn_10kpc_96->SetBinContent(sn_10kpc->FindBin(3), 0.22028  );
+    sn_10kpc_96->SetBinContent(sn_10kpc->FindBin(4), 0.0629371);
+    sn_10kpc_96->SetBinContent(sn_10kpc->FindBin(5), 0.0314685);
   }
 
   const double replive = histlive->GetBinContent(histlive->FindBin(1.5));
@@ -1003,11 +1062,17 @@ supernova_flux_limit(TH1D *hist, TH1D * histlive, const double bg, const bool is
   for(int i = 0; i < N; i++){
     accprob += prob[i];
     if(accprob/totprob > 0.9){
-      const int ndigf = dig(i*step);
-      const int ndigd = dig(10/sqrt(i*step));
       limit = i*step;
-      printf("90%% CL at %.*g of 10kpc %sSN-like flux, %.*g kpc\n",
-             ndigf, limit, is27?"27":"9.6", ndigd, 10/sqrt(limit));
+      const double distlimit = 10/sqrt(limit);
+      const double fluencelimit = fllimit(distlimit, is27);
+      const int ndigf = dig(limit);
+      const int ndigd = dig(distlimit);
+      const int ndigfl = dig(fluencelimit);
+      printf("90%% CL at %.*g of 10kpc %sSN-like flux, %.*g kpc, %#8.*g\n",
+             ndigf, limit,
+             is27?"27":"9.6",
+             ndigd, distlimit,
+             ndigfl, fluencelimit/1e12);
       break;
     }
   }
@@ -1033,9 +1098,9 @@ void process_rebin(TH1D *hist, TH1D * histlive,
 
   stylehist(rebinned, 0);
 
-  // Make the 27-solar-mass PDFs, but discard the fit
+  std::pair<double, double> snfit27;
   if(!strcmp(opts.name, "Supernova-like"))
-    supernova_flux_limit(hist, histlive, opts.extexp, true);
+    snfit27 = supernova_flux_limit(hist, histlive, opts.extexp, true);
 
   const std::pair<double, double> snfit = !strcmp(opts.name, "Supernova-like")?
      supernova_flux_limit(hist, histlive, opts.extexp, false)
@@ -1071,6 +1136,8 @@ void process_rebin(TH1D *hist, TH1D * histlive,
   ltitle->SetTextFont(42);
   ltitle->SetTextAlign(22);
   ltitle->SetNDC();
+
+  USN.cd();
   ltitle->Draw();
 
   if(preliminary) novapreliminary();
@@ -1136,7 +1203,7 @@ void process_rebin(TH1D *hist, TH1D * histlive,
       if(!strcmp(trigname, "ND long readout"))
         divided->GetYaxis()->SetRangeUser(0.01, 7);
       else if(!strcmp(trigname, "FD long readout"))
-        divided->GetYaxis()->SetRangeUser(350.1, 650);
+        divided->GetYaxis()->SetRangeUser(380.1, 730);
     }
     else{
       const double hi = divided->GetMaximum(), lo = minnonzero(divided);
@@ -1228,12 +1295,19 @@ void process_rebin(TH1D *hist, TH1D * histlive,
 
   if(!strcmp(opts.name, "Supernova-like")){
     toppad->cd();
-    for(int i = 1; i <= sn_10kpc->GetNbinsX(); i++)
-      sn_10kpc->SetBinContent(i, sn_10kpc->GetBinContent(i) + snfit.first);
-    sn_10kpc->SetLineWidth(3);
-    sn_10kpc->SetLineStyle(kDashed);
-    sn_10kpc->SetLineColor(is_fdminbias?kRed:kBlue);
-    sn_10kpc->Draw("same][");
+    for(int i = 1; i <= sn_10kpc_27->GetNbinsX(); i++)
+      sn_10kpc_27->SetBinContent(i, sn_10kpc_27->GetBinContent(i) + snfit27.first);
+    sn_10kpc_27->SetLineWidth(3);
+    sn_10kpc_27->SetLineStyle(7);
+    sn_10kpc_27->SetLineColor(is_fdminbias?kRed:kBlue);
+    sn_10kpc_27->Draw("same][");
+
+    for(int i = 1; i <= sn_10kpc_96->GetNbinsX(); i++)
+      sn_10kpc_96->SetBinContent(i, sn_10kpc_96->GetBinContent(i) + snfit.first);
+    sn_10kpc_96->SetLineWidth(2);
+    sn_10kpc_96->SetLineStyle(1);
+    sn_10kpc_96->SetLineColor(is_fdminbias?kRed:kBlue);
+    sn_10kpc_96->Draw("same][");
   }
 
   print2(Form("%s-%ds", hist->GetName(), rebin));
