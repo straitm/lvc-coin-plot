@@ -1203,7 +1203,7 @@ void process_rebin(TH1D *hist, TH1D * histlive,
       if(!strcmp(trigname, "ND long readout"))
         divided->GetYaxis()->SetRangeUser(0.01, 7);
       else if(!strcmp(trigname, "FD long readout"))
-        divided->GetYaxis()->SetRangeUser(380.1, 730);
+        divided->GetYaxis()->SetRangeUser(350.1, 650);
     }
     else{
       const double hi = divided->GetMaximum(), lo = minnonzero(divided);
@@ -1298,14 +1298,14 @@ void process_rebin(TH1D *hist, TH1D * histlive,
     for(int i = 1; i <= sn_10kpc_27->GetNbinsX(); i++)
       sn_10kpc_27->SetBinContent(i, sn_10kpc_27->GetBinContent(i) + snfit27.first);
     sn_10kpc_27->SetLineWidth(3);
-    sn_10kpc_27->SetLineStyle(7);
+    sn_10kpc_27->SetLineStyle(1);
     sn_10kpc_27->SetLineColor(is_fdminbias?kRed:kBlue);
-    sn_10kpc_27->Draw("same][");
+    //sn_10kpc_27->Draw("same][");
 
     for(int i = 1; i <= sn_10kpc_96->GetNbinsX(); i++)
       sn_10kpc_96->SetBinContent(i, sn_10kpc_96->GetBinContent(i) + snfit.first);
     sn_10kpc_96->SetLineWidth(2);
-    sn_10kpc_96->SetLineStyle(1);
+    sn_10kpc_96->SetLineStyle(kDashed);
     sn_10kpc_96->SetLineColor(is_fdminbias?kRed:kBlue);
     sn_10kpc_96->Draw("same][");
   }
